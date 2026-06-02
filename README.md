@@ -73,7 +73,8 @@ xychart-beta
 | **106** | **Optimize v2** | 1.91ms | 7.07ms | **2.28ms** 🏆 | 1.76ms | 0% |
 | **108** | **+GOMAXPROCS=1** | 1.75ms | **3.68ms** | 2.57ms | 1.91ms | 0% |
 | **109** | +Unix socket | 1.92ms | 8.96ms | 2.41ms | 1.76ms | 0% |
-| **110** | **+nginx tuning** 🏆 | 1.84ms | **3.25ms** | 2.58ms | 1.92ms | 0% |
+| **110** | **+nginx tuning** | 1.84ms | 3.25ms | 2.58ms | 1.92ms | 0% |
+| **111** | **+strip cycles** 🏆 | **1.70ms** | 5.73ms | 2.58ms | 2.19ms | 0% |
 
 > ⚠️ Pi 5 shows ±20% run-to-run variance. Values are single-run p99. All runs had **0% errors**.
 
