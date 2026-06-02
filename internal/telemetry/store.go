@@ -30,34 +30,28 @@ func (s *Store) IngestSingle(ctx context.Context, deviceID string, p TelemetryPo
 	return err
 }
 
-// IngestBatch stores a batch of telemetry points using a Redis pipeline.
-// Returns the number of points accepted.
+// IngestBatch stores a batch of telemetry points using a single ZADD command
+// with multiple score/member pairs — one Redis round trip, one command parse.
 func (s *Store) IngestBatch(ctx context.Context, deviceID string, points []TelemetryPoint) (int, error) {
-	pipe, err := s.client.Pipeline(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("pipeline: %w", err)
-	}
-
-	key := deviceKey(deviceID)
-	bufs := make([]*[]byte, 0, len(points))
+	pairs := make([]redis.ZADDPair, len(points))
+	// Keep buffers alive until after the Redis call completes.
+	bufs := make([]*[]byte, len(points))
 	for i := range points {
 		buf := GetPointBuf()
 		points[i].EncodeInto(*buf)
-		pipe.ZADD(key, points[i].TS, *buf)
-		bufs = append(bufs, buf)
+		pairs[i] = redis.ZADDPair{Score: points[i].TS, Member: *buf}
+		bufs[i] = buf
 	}
 
-	if err := pipe.Exec(ctx); err != nil {
-		// Return buffers to pool even on error.
-		for _, b := range bufs {
-			PutPointBuf(b)
-		}
-		return 0, fmt.Errorf("pipeline exec: %w", err)
-	}
+	err := s.client.ZADDM(ctx, deviceKey(deviceID), pairs)
 
-	// Return buffers to pool after successful exec.
+	// Return buffers to pool after Redis call completes.
 	for _, b := range bufs {
 		PutPointBuf(b)
+	}
+
+	if err != nil {
+		return 0, fmt.Errorf("zaddm: %w", err)
 	}
 	return len(points), nil
 }
