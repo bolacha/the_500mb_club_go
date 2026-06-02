@@ -19,7 +19,7 @@ type Client struct {
 
 // NewClient creates a client connected to addr (e.g. "localhost:6379").
 func NewClient(addr string) (*Client, error) {
-	pool := NewPool(addr, 1, 30*time.Second)
+	pool := NewPool(addr, 16, 30*time.Second)
 	return &Client{pool: pool}, nil
 }
 

@@ -16,7 +16,6 @@ services:
       - INSTANCE_ID=api-1
       - REDIS_ADDR=storage:6379
       - GOMEMLIMIT=16MiB
-      - GOMAXPROCS=1
       - PORT=8000
     ulimits:
       nofile:
@@ -36,7 +35,6 @@ services:
       - INSTANCE_ID=api-2
       - REDIS_ADDR=storage:6379
       - GOMEMLIMIT=16MiB
-      - GOMAXPROCS=1
       - PORT=8000
 
   api-3:
@@ -48,7 +46,6 @@ services:
       - INSTANCE_ID=api-3
       - REDIS_ADDR=storage:6379
       - GOMEMLIMIT=16MiB
-      - GOMAXPROCS=1
       - PORT=8000
 
   lb:
