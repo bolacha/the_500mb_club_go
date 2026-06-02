@@ -102,7 +102,9 @@ func DecodeBinary(b []byte) TelemetryPoint {
 	}
 }
 
-// MarshalJSON serializes the point to JSON. Used for API responses.
-func (p *TelemetryPoint) MarshalJSON() ([]byte, error) {
-	return json.Marshal(p)
+// MarshalJSON serializes the point to JSON using the standard library encoder.
+// Uses an alias type to prevent infinite recursion.
+func (p TelemetryPoint) MarshalJSON() ([]byte, error) {
+	type point TelemetryPoint
+	return json.Marshal(point(p))
 }
