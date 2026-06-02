@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"encoding/binary"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
@@ -59,6 +60,30 @@ func main() {
 		os.Exit(1)
 	}
 	defer redisClient.Close()
+
+	// ── Redis warm-up ──────────────────────────────────
+	// Cycle through all pool connections with PINGs to verify
+	// each is active and complete TCP handshake / buffer setup.
+	warmCtx := context.Background()
+	for i := range 16 {
+		if err := redisClient.Ping(warmCtx); err != nil {
+			logger.Warn("redis warm-up ping failed", "attempt", i, "err", err)
+		}
+	}
+
+	// Pre-populate a warm-up key to prime Redis's sorted-set
+	// skiplist allocator and response buffers. Query it once
+	// via ZREVRANGE to warm the read path.
+	warmKey := "telemetry:warmup"
+	for i := range 256 {
+		score := int64((255 - i) * 100)
+		member := make([]byte, 56)
+		binary.LittleEndian.PutUint64(member[0:8], uint64(score))
+		_ = redisClient.ZADD(warmCtx, warmKey, score, member)
+	}
+	_, _ = redisClient.ZREVRANGE(warmCtx, warmKey, 0, 255)
+
+	logger.Info("redis warm-up complete", "pings", 16)
 
 	// ── HTTP server ────────────────────────────────────
 	h := handler.New(redisClient, logger)

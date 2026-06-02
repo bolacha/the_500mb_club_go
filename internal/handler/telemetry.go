@@ -17,7 +17,6 @@ var (
 	jsonBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 )
 
-// validDeviceID checks the device ID pattern [a-zA-Z0-9_-]{1,64} without regex.
 func validDeviceID(id string) bool {
 	n := len(id)
 	if n == 0 || n > 64 {
@@ -32,9 +31,14 @@ func validDeviceID(id string) bool {
 	return true
 }
 
-type telemetryBatchPayload struct {
-	Points []telemetry.TelemetryPoint `json:"points"`
-}
+type (
+	telemetryBatchPayload struct {
+		Points []telemetry.TelemetryPoint `json:"points"`
+	}
+	batchResponse struct {
+		Accepted int `json:"accepted"`
+	}
+)
 
 func (h *Handler) handlePostSingle(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -124,5 +128,5 @@ func (h *Handler) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, map[string]int{"accepted": accepted})
+	writeJSON(w, batchResponse{Accepted: accepted})
 }

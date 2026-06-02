@@ -5,7 +5,21 @@ import (
 	"strconv"
 
 	"github.com/bolacha/the_500mb_club_go/internal/anomaly"
+	"github.com/bolacha/the_500mb_club_go/internal/telemetry"
 )
+
+// queryResponse is the JSON structure for GET /telemetry.
+type queryResponse struct {
+	Points     []telemetry.TelemetryPoint `json:"points"`
+	NextCursor *string                     `json:"next_cursor,omitzero"`
+}
+
+// anomalyError is the JSON structure for 404 anomaly responses.
+type anomalyError struct {
+	ZScore    float64 `json:"z_score"`
+	Samples   int     `json:"samples"`
+	Anomalous bool    `json:"anomalous"`
+}
 
 func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -74,14 +88,9 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 		nextCursor = &ts
 	}
 
-	resp := map[string]any{
-		"points": points,
-		"next_cursor": nextCursor,
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, resp)
+	writeJSON(w, queryResponse{Points: points, NextCursor: nextCursor})
 }
 
 func (h *Handler) handleAnomaly(w http.ResponseWriter, r *http.Request) {
@@ -102,13 +111,9 @@ func (h *Handler) handleAnomaly(w http.ResponseWriter, r *http.Request) {
 	result, err := anomaly.ComputeBinary(rawPoints)
 	if err != nil {
 		// Not enough samples — return 404.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
-	writeJSON(w, map[string]any{
-		"z_score":   0,
-		"samples":   result.Samples,
-		"anomalous": false,
-	})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(w, anomalyError{Samples: result.Samples})
 		return
 	}
 
