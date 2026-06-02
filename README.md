@@ -72,6 +72,8 @@ xychart-beta
 | **104** | Back to best | 2.05ms | 15.00ms | 3.37ms | 2.14ms | 0% |
 | **106** | **Optimize v2** | 1.91ms | 7.07ms | **2.28ms** 🏆 | 1.76ms | 0% |
 | **108** | **+GOMAXPROCS=1** | 1.75ms | **3.68ms** | 2.57ms | 1.91ms | 0% |
+| **109** | +Unix socket | 1.92ms | 8.96ms | 2.41ms | 1.76ms | 0% |
+| **main** | **+nginx tuning** | — | — | — | — | — |
 
 > ⚠️ Pi 5 shows ±20% run-to-run variance. Values are single-run p99. All runs had **0% errors**.
 
@@ -166,6 +168,17 @@ environment:
 ```
 
 **Why:** With `cpus: 0.55` per container, Linux CFS allocates ~55% of one core. Go's default sees all 4 host cores, spawning threads that CFS must preempt — causing latency spikes. `GOMAXPROCS=1` matches threads to quota. **Real Pi result: batch p99 dropped 48% (7.07ms → 3.68ms).**
+
+### 7. Nginx Tuning — Keepalive + Buffering
+
+```nginx
+upstream api { keepalive 32; }
+proxy_buffering off;
+tcp_nodelay on;
+proxy_socket_keepalive on;
+```
+
+**Why:** Default nginx opens a new TCP connection to the backend per request. `keepalive 32` reuses connections, eliminating TCP handshake overhead. `proxy_buffering off` passes data without copying through nginx's buffer. **Docker Desktop result: spike p99 dropped 38% (7.5ms → 4.7ms).** Unix socket was also tested but showed no benefit on real Pi 5.
 
 ## Budget
 
