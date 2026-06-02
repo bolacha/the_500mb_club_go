@@ -105,6 +105,9 @@ func main() {
 	<-ctx.Done()
 	logger.Info("shutting down...")
 
+	// Flush any buffered writes before stopping.
+	h.FlushBuffer()
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

@@ -16,6 +16,7 @@ import (
 type Handler struct {
 	redis        *redis.Client
 	store        *telemetry.Store
+	writeBuf     *telemetry.WriteBuffer
 	logger       *slog.Logger
 	postCount    atomic.Int64
 	batchCount   atomic.Int64
@@ -25,11 +26,18 @@ type Handler struct {
 
 // New creates a new Handler with the given Redis client.
 func New(redisClient *redis.Client, logger *slog.Logger) *Handler {
+	store := telemetry.NewStore(redisClient)
 	return &Handler{
-		redis:  redisClient,
-		store:  telemetry.NewStore(redisClient),
-		logger: logger,
+		redis:    redisClient,
+		store:    store,
+		writeBuf: telemetry.NewWriteBuffer(store),
+		logger:   logger,
 	}
+}
+
+// FlushBuffer drains any buffered writes. Call during graceful shutdown.
+func (h *Handler) FlushBuffer() {
+	h.writeBuf.Close()
 }
 
 // RegisterRoutes sets up all routes on the given ServeMux.

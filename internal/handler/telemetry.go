@@ -41,12 +41,9 @@ func (h *Handler) handlePostSingle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.IngestSingle(r.Context(), id, point); err != nil {
-		h.logger.Error("ingest single failed", "device", id, "err", err)
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-		return
-	}
-
+	// Queue to bounded write buffer — flushes as Redis pipeline when full or after 5ms.
+	h.writeBuf.Add(r.Context(), id, point)
+	h.postCount.Add(1)
 	w.WriteHeader(http.StatusAccepted)
 }
 
