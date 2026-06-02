@@ -71,6 +71,7 @@ xychart-beta
 | **103** | Redis speed configs | 2.15ms | 6.37ms ❌ | 4.10ms ❌ | 2.63ms | 0% |
 | **104** | Back to best | 2.05ms | 15.00ms | 3.37ms | 2.14ms | 0% |
 | **106** | **Optimize v2** | 1.91ms | 7.07ms | **2.28ms** 🏆 | 1.76ms | 0% |
+| **108** | **+GOMAXPROCS=1** | 1.75ms | **3.68ms** | 2.57ms | 1.91ms | 0% |
 
 > ⚠️ Pi 5 shows ±20% run-to-run variance. Values are single-run p99. All runs had **0% errors**.
 
@@ -156,6 +157,15 @@ debug.SetGCPercent(25)         // frequent small GCs
 ```
 
 **Why:** With `mem_limit=20m` per container, the heap must stay under 16 MiB. `GOGC=25` triggers GC at 1.25× live heap (vs 100's 2×). Smaller, more frequent GCs avoid the latency spikes of large GC cycles. `GOMEMLIMIT` is the hard backstop.
+
+### 6. GOMAXPROCS=1 — Avoiding CFS Throttling
+
+```yaml
+environment:
+  - GOMAXPROCS=1
+```
+
+**Why:** With `cpus: 0.55` per container, Linux CFS allocates ~55% of one core. Go's default sees all 4 host cores, spawning threads that CFS must preempt — causing latency spikes. `GOMAXPROCS=1` matches threads to quota. **Real Pi result: batch p99 dropped 48% (7.07ms → 3.68ms).**
 
 ## Budget
 
