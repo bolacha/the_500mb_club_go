@@ -36,12 +36,12 @@ func main() {
 	fmt.Printf("Target:   %s\n", *baseURL)
 	fmt.Printf("Workers:  %d\n", *workers)
 	fmt.Printf("Duration: %v\n", *duration)
-	fmt.Printf("SLO:      p99 < %v, errors < %.1f%%\n\n", *p99Target, *errTarget*100)
+	fmt.Printf("SLO:      p99 < %v, errors < %.1f%%\n", *p99Target, *errTarget*100)
 
 	// Pre-seed.
 	fmt.Print("Seeding... ")
 	seedDevice(*deviceID)
-	fmt.Println("done.\n")
+	fmt.Println("done.")
 
 	var (
 		latencies []time.Duration

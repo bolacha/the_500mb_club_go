@@ -51,7 +51,7 @@ func main() {
 	// Pre-seed 256 points for anomaly queries.
 	fmt.Print("Seeding 256 points for anomaly queries... ")
 	seedDevice(*deviceID)
-	fmt.Println("done.\n")
+	fmt.Println("done.")
 
 	fmt.Printf("%-8s %-10s %-12s %-12s %-12s %-10s %s\n",
 		"RPS", "SUSTAINED", "AVG", "P50", "P99", "ERRORS", "STATUS")

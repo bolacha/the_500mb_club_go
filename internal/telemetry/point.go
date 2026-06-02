@@ -7,10 +7,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sync"
 )
 
 // PointSize is the size in bytes of a compact binary-encoded telemetry point.
 const PointSize = 56
+
+// pointBufPool reuses 56-byte buffers for compact binary encoding.
+var pointBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, PointSize)
+		return &b
+	},
+}
+
+// GetPointBuf returns a pooled 56-byte buffer. Call PutPointBuf to return it.
+func GetPointBuf() *[]byte {
+	return pointBufPool.Get().(*[]byte)
+}
+
+// PutPointBuf returns a buffer to the pool.
+func PutPointBuf(b *[]byte) {
+	pointBufPool.Put(b)
+}
 
 // TelemetryPoint represents a single device telemetry reading.
 type TelemetryPoint struct {

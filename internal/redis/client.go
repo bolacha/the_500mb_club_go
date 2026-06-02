@@ -48,7 +48,7 @@ func (c *Client) ZADD(ctx context.Context, key string, score int64, member []byt
 	}
 	defer c.pool.Put(conn)
 
-	return conn.Do(ctx, "ZADD", key, itoa(score), member).ExpectInt()
+	return conn.Do(ctx, "ZADD", key, score, member).ExpectInt()
 }
 
 // ZRANGEBYSCORE returns members in [min, max] with optional LIMIT offset count.
@@ -60,10 +60,10 @@ func (c *Client) ZRANGEBYSCORE(ctx context.Context, key string, min, max int64, 
 	defer c.pool.Put(conn)
 
 	if offset > 0 || count > 0 {
-		return conn.Do(ctx, "ZRANGEBYSCORE", key, itoa(min), itoa(max),
-			"LIMIT", itoa(offset), itoa(count)).ExpectBulkArray()
+		return conn.Do(ctx, "ZRANGEBYSCORE", key, min, max,
+			"LIMIT", offset, count).ExpectBulkArray()
 	}
-	return conn.Do(ctx, "ZRANGEBYSCORE", key, itoa(min), itoa(max)).ExpectBulkArray()
+	return conn.Do(ctx, "ZRANGEBYSCORE", key, min, max).ExpectBulkArray()
 }
 
 // ZREVRANGE returns members from start to stop in reverse order (highest score first).
@@ -74,7 +74,7 @@ func (c *Client) ZREVRANGE(ctx context.Context, key string, start, stop int) ([]
 	}
 	defer c.pool.Put(conn)
 
-	return conn.Do(ctx, "ZREVRANGE", key, itoa(start), itoa(stop)).ExpectBulkArray()
+	return conn.Do(ctx, "ZREVRANGE", key, start, stop).ExpectBulkArray()
 }
 
 // Pipeline collects commands and flushes them in a single round trip.
@@ -95,7 +95,7 @@ func (c *Client) Pipeline(ctx context.Context) (*Pipeline, error) {
 
 // ZADD queues a ZADD command.
 func (p *Pipeline) ZADD(key string, score int64, member []byte) *Result {
-	return p.queue("ZADD", key, itoa(score), member)
+	return p.queue("ZADD", key, score, member)
 }
 
 // Exec flushes all queued commands and reads all responses. Returns the connection to the pool.
@@ -210,20 +210,47 @@ func (c *Conn) Do(ctx context.Context, args ...any) *Result {
 }
 
 // writeCommand writes a RESP2 command: *<N>\r\n$<len>\r\n<arg>\r\n...
+// Uses a pooled scratch buffer to avoid allocations from fmt.Fprintf.
 func (c *Conn) writeCommand(args ...any) error {
+	var scratch [32]byte
+
 	// Write array header.
-	fmt.Fprintf(c.wr, "*%d\r\n", len(args))
+	c.wr.WriteByte('*')
+	c.wr.Write(strconv.AppendInt(scratch[:0], int64(len(args)), 10))
+	c.wr.WriteString("\r\n")
+
 	for _, arg := range args {
+		c.wr.WriteByte('$')
 		switch v := arg.(type) {
 		case string:
-			fmt.Fprintf(c.wr, "$%d\r\n%s\r\n", len(v), v)
+			c.wr.Write(strconv.AppendInt(scratch[:0], int64(len(v)), 10))
+			c.wr.WriteString("\r\n")
+			c.wr.WriteString(v)
+			c.wr.WriteString("\r\n")
 		case []byte:
-			fmt.Fprintf(c.wr, "$%d\r\n", len(v))
+			c.wr.Write(strconv.AppendInt(scratch[:0], int64(len(v)), 10))
+			c.wr.WriteString("\r\n")
 			c.wr.Write(v)
 			c.wr.WriteString("\r\n")
+		case int64:
+			s := strconv.FormatInt(v, 10)
+			c.wr.Write(strconv.AppendInt(scratch[:0], int64(len(s)), 10))
+			c.wr.WriteString("\r\n")
+			c.wr.WriteString(s)
+			c.wr.WriteString("\r\n")
+		case int:
+			s := strconv.Itoa(v)
+			c.wr.Write(strconv.AppendInt(scratch[:0], int64(len(s)), 10))
+			c.wr.WriteString("\r\n")
+			c.wr.WriteString(s)
+			c.wr.WriteString("\r\n")
 		default:
+			// Fallback for any other type (e.g. itoa returns string for int scores).
 			s := fmt.Sprint(v)
-			fmt.Fprintf(c.wr, "$%d\r\n%s\r\n", len(s), s)
+			c.wr.Write(strconv.AppendInt(scratch[:0], int64(len(s)), 10))
+			c.wr.WriteString("\r\n")
+			c.wr.WriteString(s)
+			c.wr.WriteString("\r\n")
 		}
 	}
 	return nil
@@ -366,7 +393,3 @@ func expectBulkArray(resp any) ([][]byte, error) {
 }
 
 // ── helpers ─────────────────────────────────────────────
-
-func itoa[T int | int64](n T) string {
-	return strconv.FormatInt(int64(n), 10)
-}

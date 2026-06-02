@@ -23,7 +23,11 @@ func deviceKey(id string) string {
 
 // IngestSingle stores a single telemetry point in the device's sorted set.
 func (s *Store) IngestSingle(ctx context.Context, deviceID string, p TelemetryPoint) error {
-	return s.client.ZADD(ctx, deviceKey(deviceID), p.TS, p.Encode())
+	buf := GetPointBuf()
+	p.EncodeInto(*buf)
+	err := s.client.ZADD(ctx, deviceKey(deviceID), p.TS, *buf)
+	PutPointBuf(buf)
+	return err
 }
 
 // IngestBatch stores a batch of telemetry points using a Redis pipeline.
@@ -35,12 +39,25 @@ func (s *Store) IngestBatch(ctx context.Context, deviceID string, points []Telem
 	}
 
 	key := deviceKey(deviceID)
+	bufs := make([]*[]byte, 0, len(points))
 	for i := range points {
-		pipe.ZADD(key, points[i].TS, points[i].Encode())
+		buf := GetPointBuf()
+		points[i].EncodeInto(*buf)
+		pipe.ZADD(key, points[i].TS, *buf)
+		bufs = append(bufs, buf)
 	}
 
 	if err := pipe.Exec(ctx); err != nil {
+		// Return buffers to pool even on error.
+		for _, b := range bufs {
+			PutPointBuf(b)
+		}
 		return 0, fmt.Errorf("pipeline exec: %w", err)
+	}
+
+	// Return buffers to pool after successful exec.
+	for _, b := range bufs {
+		PutPointBuf(b)
 	}
 	return len(points), nil
 }
