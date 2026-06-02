@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -83,7 +82,6 @@ type Pipeline struct {
 	client *Client
 	conn   *Conn
 	cmds   []*Result
-	mu     sync.Mutex
 }
 
 // Pipeline creates a new pipeline. Call Pipeline() to get a builder, then Exec() to flush.

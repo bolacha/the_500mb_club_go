@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,27 +21,20 @@ import (
 
 func main() {
 	// ── configuration ──────────────────────────────────
-	instanceID := os.Getenv("INSTANCE_ID")
-	redisAddr := os.Getenv("REDIS_ADDR")
-	port := os.Getenv("PORT")
-
-	if instanceID == "" {
-		instanceID = "api-dev"
-	}
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
-	}
-	if port == "" {
-		port = "8000"
-	}
+	instanceID := cmp.Or(os.Getenv("INSTANCE_ID"), "api-dev")
+	redisAddr := cmp.Or(os.Getenv("REDIS_ADDR"), "localhost:6379")
+	port := cmp.Or(os.Getenv("PORT"), "8000")
+	gomemlimit := cmp.Or(os.Getenv("GOMEMLIMIT"), "70MiB")
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	// ── GC tuning ──────────────────────────────────────
-	// Cap memory at 70 MiB per instance. Disable automatic GC; we trigger manually.
+	// Cap memory per instance (parsed from GOMEMLIMIT env or default 70 MiB).
+	// Disable automatic GC; we trigger manually.
 	gcInterval := 5 * time.Second
-	debug.SetMemoryLimit(70 << 20) // 70 MiB
-	debug.SetGCPercent(-1)         // disable automatic GC
+	memLimit := parseMemLimit(gomemlimit)
+	debug.SetMemoryLimit(memLimit)
+	debug.SetGCPercent(-1) // disable automatic GC
 
 	go func() {
 		ticker := time.NewTicker(gcInterval)
@@ -53,7 +49,7 @@ func main() {
 		"instance", instanceID,
 		"redis", redisAddr,
 		"port", port,
-		"gomemlimit", "70MiB",
+		"gomemlimit", gomemlimit,
 		"gogc", "off",
 	)
 
@@ -106,4 +102,38 @@ func main() {
 		logger.Error("shutdown error", "err", err)
 	}
 	logger.Info("stopped")
+}
+
+// parseMemLimit converts a string like "70MiB" to bytes.
+func parseMemLimit(s string) int64 {
+	s = strings.TrimSuffix(s, "iB")
+	s = strings.TrimSuffix(s, "ib")
+	s = strings.TrimSuffix(s, "B")
+	s = strings.TrimSuffix(s, "b")
+	mult := int64(1)
+	switch {
+	case strings.HasSuffix(s, "Mi"):
+		mult = 1 << 20
+		s = s[:len(s)-2]
+	case strings.HasSuffix(s, "Gi"):
+		mult = 1 << 30
+		s = s[:len(s)-2]
+	case strings.HasSuffix(s, "Ki"):
+		mult = 1 << 10
+		s = s[:len(s)-2]
+	case strings.HasSuffix(s, "M"):
+		mult = 1 << 20
+		s = s[:len(s)-1]
+	case strings.HasSuffix(s, "G"):
+		mult = 1 << 30
+		s = s[:len(s)-1]
+	case strings.HasSuffix(s, "K"):
+		mult = 1 << 10
+		s = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 70 << 20 // default 70 MiB
+	}
+	return n * mult
 }

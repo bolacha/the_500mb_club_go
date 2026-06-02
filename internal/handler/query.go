@@ -66,6 +66,8 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.queryCount.Add(1)
+
 	// Determine next_cursor from the last returned point's timestamp.
 	var nextCursor *string
 	if len(points) == limit {
@@ -107,10 +109,11 @@ func (h *Handler) handleAnomaly(w http.ResponseWriter, r *http.Request) {
 			"z_score":   0,
 			"samples":   result.Samples,
 			"anomalous": false,
-			"error":     err.Error(),
 		})
 		return
 	}
+
+	h.anomalyCount.Add(1)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

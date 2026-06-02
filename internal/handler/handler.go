@@ -3,8 +3,10 @@
 package handler
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/bolacha/the_500mb_club_go/internal/redis"
 	"github.com/bolacha/the_500mb_club_go/internal/telemetry"
@@ -12,23 +14,14 @@ import (
 
 // Handler holds all dependencies for HTTP handlers.
 type Handler struct {
-	redis   *redis.Client
-	store   *telemetry.Store
-	logger  *slog.Logger
-	metrics *metrics
+	redis        *redis.Client
+	store        *telemetry.Store
+	logger       *slog.Logger
+	postCount    atomic.Int64
+	batchCount   atomic.Int64
+	queryCount   atomic.Int64
+	anomalyCount atomic.Int64
 }
-
-// metrics tracks simple counters for the /metrics endpoint.
-type metrics struct {
-	requests *counter
-}
-
-type counter struct {
-	value int64
-}
-
-func (c *counter) inc() { c.value++ }
-func (c *counter) val() int64 { return c.value }
 
 // New creates a new Handler with the given Redis client.
 func New(redisClient *redis.Client, logger *slog.Logger) *Handler {
@@ -36,9 +29,6 @@ func New(redisClient *redis.Client, logger *slog.Logger) *Handler {
 		redis:  redisClient,
 		store:  telemetry.NewStore(redisClient),
 		logger: logger,
-		metrics: &metrics{
-			requests: &counter{},
-		},
 	}
 }
 
@@ -55,4 +45,17 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Operational endpoints.
 	mux.HandleFunc("GET /readyz", h.handleReadyz)
 	mux.HandleFunc("GET /metrics", h.handleMetrics)
+}
+
+// handleMetrics serves Prometheus metrics in text/plain format.
+func (h *Handler) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	w.WriteHeader(http.StatusOK)
+
+	fmt.Fprintf(w, "# HELP http_requests_total Total HTTP requests by operation.\n")
+	fmt.Fprintf(w, "# TYPE http_requests_total counter\n")
+	fmt.Fprintf(w, "http_requests_total{op=\"post\"} %d\n", h.postCount.Load())
+	fmt.Fprintf(w, "http_requests_total{op=\"batch\"} %d\n", h.batchCount.Load())
+	fmt.Fprintf(w, "http_requests_total{op=\"range\"} %d\n", h.queryCount.Load())
+	fmt.Fprintf(w, "http_requests_total{op=\"anomaly\"} %d\n", h.anomalyCount.Load())
 }
