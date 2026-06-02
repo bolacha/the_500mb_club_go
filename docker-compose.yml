@@ -7,6 +7,9 @@ services:
   api-1: &api
     image: ghcr.io/bolacha/the_500mb_club_go:latest
     user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     mem_limit: 20m
     cpus: 0.55
     environment:
@@ -25,6 +28,9 @@ services:
 
   api-2:
     <<: *api
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       - INSTANCE_ID=api-2
       - REDIS_ADDR=storage:6379
@@ -33,6 +39,9 @@ services:
 
   api-3:
     <<: *api
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       - INSTANCE_ID=api-3
       - REDIS_ADDR=storage:6379
