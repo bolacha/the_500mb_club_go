@@ -1,0 +1,11 @@
+{
+  "collaborators": [
+    {
+      "name": "Lucas Costa Oliveira",
+      "social_links": [
+        "https://github.com/bolacha"
+      ]
+    }
+  ],
+  "stack": ["go", "redis", "nginx"]
+}
