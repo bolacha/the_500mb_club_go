@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -75,7 +76,8 @@ func main() {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	// Apply middleware: InstanceID (required) + request logging.
+	// Wire pprof handlers for profiling (not exposed through LB, direct access only).
+	mux.Handle("/debug/", http.DefaultServeMux)
 	var srv http.Handler = mux
 	srv = middleware.InstanceID(instanceID)(srv)
 	srv = middleware.RequestLogger(logger)(srv)
