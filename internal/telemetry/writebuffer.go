@@ -8,7 +8,7 @@ import (
 
 const (
 	defaultBufferSize = 64
-	defaultMaxWait    = 5 * time.Millisecond
+	defaultMaxWait    = 1 * time.Millisecond
 	maxPooledCap      = 128
 )
 
