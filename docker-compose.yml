@@ -71,7 +71,7 @@ services:
       interval: 1s
       timeout: 2s
       retries: 5
-    command: redis-server --maxmemory 40mb --maxmemory-policy noeviction --save "" --tcp-backlog 511 --hz 100 --activerehashing no --tcp-keepalive 60
+    command: redis-server --maxmemory 40mb --maxmemory-policy noeviction --save ""
 
 networks:
   backend:

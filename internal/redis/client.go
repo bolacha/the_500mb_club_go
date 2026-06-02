@@ -40,31 +40,6 @@ func (c *Client) Ping(ctx context.Context) error {
 	return conn.Do(ctx, "PING").ExpectSimple("PONG")
 }
 
-// ZADDM adds multiple score/member pairs in a single ZADD command.
-// Much faster than pipelined individual ZADDs — one Redis command, one response.
-func (c *Client) ZADDM(ctx context.Context, key string, pairs []ZADDPair) error {
-	conn, err := c.pool.Get(ctx)
-	if err != nil {
-		return err
-	}
-	defer c.pool.Put(conn)
-
-	args := make([]any, 2+len(pairs)*2)
-	args[0] = "ZADD"
-	args[1] = key
-	for i, p := range pairs {
-		args[2+i*2] = p.Score
-		args[2+i*2+1] = p.Member
-	}
-	return conn.Do(ctx, args...).ExpectInt()
-}
-
-// ZADDPair is a score+member pair for ZADDM.
-type ZADDPair struct {
-	Score  int64
-	Member []byte
-}
-
 // ZADD adds a member with a score to a sorted set.
 func (c *Client) ZADD(ctx context.Context, key string, score int64, member []byte) error {
 	conn, err := c.pool.Get(ctx)
