@@ -3,6 +3,8 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -38,6 +40,15 @@ func New(redisClient *redis.Client, logger *slog.Logger) *Handler {
 // FlushBuffer drains any buffered writes. Call during graceful shutdown.
 func (h *Handler) FlushBuffer() {
 	h.writeBuf.Close()
+}
+
+// writeJSON encodes v to w using a pooled buffer.
+func writeJSON(w http.ResponseWriter, v any) {
+	buf := jsonBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	json.NewEncoder(buf).Encode(v)
+	w.Write(buf.Bytes())
+	jsonBufPool.Put(buf)
 }
 
 // RegisterRoutes sets up all routes on the given ServeMux.

@@ -1,10 +1,10 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"sync"
 
@@ -12,13 +12,24 @@ import (
 )
 
 var (
-	deviceIDRe  = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 	bodyPool4K  = sync.Pool{New: func() any { return make([]byte, 4096) }}
 	bodyPool64K = sync.Pool{New: func() any { return make([]byte, 65536) }}
+	jsonBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 )
 
+// validDeviceID checks the device ID pattern [a-zA-Z0-9_-]{1,64} without regex.
 func validDeviceID(id string) bool {
-	return deviceIDRe.MatchString(id)
+	n := len(id)
+	if n == 0 || n > 64 {
+		return false
+	}
+	for i := range n {
+		c := id[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 type telemetryBatchPayload struct {
@@ -113,5 +124,5 @@ func (h *Handler) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]int{"accepted": accepted})
+	writeJSON(w, map[string]int{"accepted": accepted})
 }

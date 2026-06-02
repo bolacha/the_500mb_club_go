@@ -361,14 +361,17 @@ func (c *Conn) readBulkString() ([]byte, error) {
 }
 
 func (c *Conn) readLine() ([]byte, error) {
-	line, err := c.rd.ReadBytes('\n')
+	line, err := c.rd.ReadSlice('\n')
 	if err != nil {
 		return nil, err
 	}
 	if len(line) < 2 || line[len(line)-2] != '\r' {
 		return nil, fmt.Errorf("invalid line ending")
 	}
-	return line[:len(line)-2], nil
+	// Return a copy since ReadSlice's buffer may be overwritten.
+	b := make([]byte, len(line)-2)
+	copy(b, line[:len(line)-2])
+	return b, nil
 }
 
 func expectInt(resp any) error {

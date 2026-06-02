@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -82,7 +81,7 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, resp)
 }
 
 func (h *Handler) handleAnomaly(w http.ResponseWriter, r *http.Request) {
@@ -103,13 +102,13 @@ func (h *Handler) handleAnomaly(w http.ResponseWriter, r *http.Request) {
 	result, err := anomaly.ComputeBinary(rawPoints)
 	if err != nil {
 		// Not enough samples — return 404.
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]any{
-			"z_score":   0,
-			"samples":   result.Samples,
-			"anomalous": false,
-		})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	writeJSON(w, map[string]any{
+		"z_score":   0,
+		"samples":   result.Samples,
+		"anomalous": false,
+	})
 		return
 	}
 
@@ -117,5 +116,5 @@ func (h *Handler) handleAnomaly(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, result)
 }
