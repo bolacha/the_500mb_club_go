@@ -3,7 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
-	"io"
+	"errors"
 	"net/http"
 	"strconv"
 	"sync"
@@ -12,8 +12,6 @@ import (
 )
 
 var (
-	bodyPool4K  = sync.Pool{New: func() any { return make([]byte, 4096) }}
-	bodyPool64K = sync.Pool{New: func() any { return make([]byte, 65536) }}
 	jsonBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 )
 
@@ -47,31 +45,26 @@ func (h *Handler) handlePostSingle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	buf := bodyPool4K.Get().([]byte)
-	n, err := io.ReadFull(r.Body, buf[:4096])
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-		bodyPool4K.Put(buf)
-		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
-		return
-	}
-	if n == 4096 {
-		extra := make([]byte, 1)
-		if extraN, _ := r.Body.Read(extra); extraN > 0 {
-			bodyPool4K.Put(buf)
+	// Decode directly from request body — saves one allocation vs ReadFull+Unmarshal.
+	// MaxBytesReader handles 413 for oversized payloads.
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	var p telemetry.TelemetryPoint
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
 		}
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
 	}
-	body := buf[:n]
-	defer bodyPool4K.Put(buf)
 
-	point, err := telemetry.DecodeJSON(body)
-	if err != nil {
+	if err := p.Validate(); err != nil {
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
 		return
 	}
 
-	h.writeBuf.Add(r.Context(), id, point)
+	h.writeBuf.Add(r.Context(), id, p)
 	h.postCount.Add(1)
 	w.WriteHeader(http.StatusAccepted)
 }
@@ -83,28 +76,24 @@ func (h *Handler) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	buf := bodyPool64K.Get().([]byte)
-	n, err := io.ReadFull(r.Body, buf[:65536])
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-		bodyPool64K.Put(buf)
-		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
-		return
-	}
-	body := buf[:n]
-	defer bodyPool64K.Put(buf)
-
+	r.Body = http.MaxBytesReader(w, r.Body, 65536)
 	var payload telemetryBatchPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			w.Write([]byte(`{"error":"payload too large"}`))
+			return
+		}
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 		return
 	}
 
-	n = len(payload.Points)
-	if n < 1 {
+	if len(payload.Points) < 1 {
 		http.Error(w, `{"error":"batch must contain at least 1 point"}`, http.StatusBadRequest)
 		return
 	}
-	if n > 100 {
+	if len(payload.Points) > 100 {
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
 		w.Write([]byte(`{"error":"batch exceeds 100 points"}`))
 		return

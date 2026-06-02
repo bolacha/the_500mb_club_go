@@ -7,13 +7,14 @@ import (
 )
 
 const (
-	defaultBufferSize = 64
-	defaultMaxWait    = 5 * time.Millisecond
-	maxPooledCap      = 128
+	defaultBufferSize = 128
+	defaultMaxWait    = 10 * time.Millisecond
+	maxPooledCap      = 256
 )
 
 // WriteBuffer accumulates single-point writes and flushes them as a Redis pipeline.
-// Stays strictly bounded: max 64 entries (~3.5 KB per instance).
+// Stays strictly bounded: max 128 entries (~7 KB per instance).
+// Points are pre-encoded to 56-byte binary at Add time — zero work at flush.
 type WriteBuffer struct {
 	store   *Store
 	maxSize int
@@ -26,7 +27,8 @@ type WriteBuffer struct {
 
 type bufferEntry struct {
 	deviceID string
-	point    TelemetryPoint
+	score    int64
+	data     []byte // 56-byte pre-encoded point
 }
 
 // NewWriteBuffer creates a bounded write buffer. maxSize caps entries (default 64).
@@ -38,16 +40,27 @@ func NewWriteBuffer(store *Store) *WriteBuffer {
 	}
 }
 
-// Add queues a single point. If the buffer reaches maxSize, it flushes immediately.
+// Add queues a single point, pre-encoding it to 56-byte binary immediately.
 // Returns immediately — persistence is async (spec allows this for 202 responses).
 func (wb *WriteBuffer) Add(ctx context.Context, deviceID string, p TelemetryPoint) {
+	// Pre-encode: one allocation now saves encode+pool ops at flush time.
+	buf := GetPointBuf()
+	p.EncodeInto(*buf)
+	entry := bufferEntry{
+		deviceID: deviceID,
+		score:    p.TS,
+		data:     make([]byte, PointSize),
+	}
+	copy(entry.data, *buf)
+	PutPointBuf(buf)
+
 	wb.mu.Lock()
 	if wb.closed {
 		wb.mu.Unlock()
 		return
 	}
 
-	wb.entries = append(wb.entries, bufferEntry{deviceID: deviceID, point: p})
+	wb.entries = append(wb.entries, entry)
 
 	if len(wb.entries) >= wb.maxSize {
 		wb.flushLocked(ctx)
@@ -113,13 +126,9 @@ func (wb *WriteBuffer) flushEntries(ctx context.Context, entries []bufferEntry) 
 		return // drop on floor — spec allows async persistence
 	}
 
-	// Queue all ZADDs.
+	// Queue all ZADDs using pre-encoded data — zero encoding work.
 	for _, e := range entries {
-		buf := GetPointBuf()
-		e.point.EncodeInto(*buf)
-		pipe.ZADD(deviceKey(e.deviceID), e.point.TS, *buf)
-		// Return buffer to pool immediately — pipeline holds a copy of bytes in memory.
-		PutPointBuf(buf)
+		pipe.ZADD(deviceKey(e.deviceID), e.score, e.data)
 	}
 
 	pipe.Exec(ctx)
