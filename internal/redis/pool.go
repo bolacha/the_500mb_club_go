@@ -9,6 +9,7 @@ import (
 
 // Pool manages a bounded set of reusable Redis connections.
 type Pool struct {
+	network string
 	addr    string
 	timeout time.Duration
 	ch      chan *Conn
@@ -16,16 +17,17 @@ type Pool struct {
 	closed  bool
 }
 
-// NewPool creates a connection pool of size connections to addr.
-// All connections are pre-connected eagerly.
-func NewPool(addr string, size int, timeout time.Duration) *Pool {
+// NewPool creates a connection pool of size connections.
+// network is "tcp" or "unix".
+func NewPool(network, addr string, size int, timeout time.Duration) *Pool {
 	p := &Pool{
+		network: network,
 		addr:    addr,
 		timeout: timeout,
 		ch:      make(chan *Conn, size),
 	}
 	for range size {
-		conn, err := newConn(addr, timeout)
+		conn, err := newConn(network, addr, timeout)
 		if err != nil {
 			continue
 		}
