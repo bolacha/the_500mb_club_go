@@ -45,8 +45,21 @@ run:
 	$(MAKE) build
 	INSTANCE_ID=dev-1 REDIS_ADDR=localhost:6379 ./bin/api
 
-# ── local stack ──────────────────────────────────────────
-up:
+# ── stress tests (match benchmark scenarios) ─────────────
+steady:
+	go run ./stress/cmd/steady/ -url http://localhost:8080
+
+spike:
+	go run ./stress/cmd/spike/ -url http://localhost:8080
+
+endurance:
+	go run ./stress/cmd/endurance/ -url http://localhost:8080 -dur 5m
+
+capacity:
+	go run ./stress/cmd/throughput/ -url http://localhost:8080 -start 200 -end 3000 -step 100 -dur 10s
+
+load:
+	go run ./stress/cmd/concurrent/ -url http://localhost:8080 -workers 20 -dur 30s
 	docker compose up -d --build
 
 down:
