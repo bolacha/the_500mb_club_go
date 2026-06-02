@@ -7,14 +7,12 @@ services:
   api-1: &api
     image: ghcr.io/bolacha/the_500mb_club_go:latest
     user: "10001:10001"
-    mem_limit: 85m
+    mem_limit: 20m
     cpus: 0.55
     environment:
       - INSTANCE_ID=api-1
       - REDIS_ADDR=storage:6379
-      - GOMEMLIMIT=75MiB
-      # Uncomment on real Pi hardware to avoid CFS throttling:
-      # - GOMAXPROCS=1
+      - GOMEMLIMIT=16MiB
       - PORT=8000
     ulimits:
       nofile:
@@ -30,8 +28,7 @@ services:
     environment:
       - INSTANCE_ID=api-2
       - REDIS_ADDR=storage:6379
-      - GOMEMLIMIT=75MiB
-      # - GOMAXPROCS=1
+      - GOMEMLIMIT=16MiB
       - PORT=8000
 
   api-3:
@@ -39,8 +36,7 @@ services:
     environment:
       - INSTANCE_ID=api-3
       - REDIS_ADDR=storage:6379
-      - GOMEMLIMIT=75MiB
-      # - GOMAXPROCS=1
+      - GOMEMLIMIT=16MiB
       - PORT=8000
 
   lb:
