@@ -2,10 +2,6 @@
 #
 # Stack: 3 × Go API + Redis + Nginx round-robin LB
 # Aggregate budget: 2 CPUs / 500 MB
-#
-# NOTE: internal: true removed for Docker Desktop compatibility.
-# On real Raspberry Pi (native Linux Docker), add `internal: true` to the
-# backend network for extra security — it doesn't block port publishing there.
 
 services:
   api-1: &api
@@ -17,7 +13,13 @@ services:
       - INSTANCE_ID=api-1
       - REDIS_ADDR=storage:6379
       - GOMEMLIMIT=75MiB
+      # Uncomment on real Pi hardware to avoid CFS throttling:
+      # - GOMAXPROCS=1
       - PORT=8000
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     networks: [backend]
     depends_on:
       storage:
@@ -29,6 +31,7 @@ services:
       - INSTANCE_ID=api-2
       - REDIS_ADDR=storage:6379
       - GOMEMLIMIT=75MiB
+      # - GOMAXPROCS=1
       - PORT=8000
 
   api-3:
@@ -37,6 +40,7 @@ services:
       - INSTANCE_ID=api-3
       - REDIS_ADDR=storage:6379
       - GOMEMLIMIT=75MiB
+      # - GOMAXPROCS=1
       - PORT=8000
 
   lb:
@@ -55,6 +59,8 @@ services:
     mem_limit: 50m
     cpus: 0.20
     networks: [backend]
+    tmpfs:
+      - /data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 1s

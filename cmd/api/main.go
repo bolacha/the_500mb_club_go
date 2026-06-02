@@ -25,8 +25,15 @@ func main() {
 	redisAddr := cmp.Or(os.Getenv("REDIS_ADDR"), "localhost:6379")
 	port := cmp.Or(os.Getenv("PORT"), "8000")
 	gomemlimit := cmp.Or(os.Getenv("GOMEMLIMIT"), "70MiB")
+	gomaxprocs := cmp.Or(os.Getenv("GOMAXPROCS"), "0")
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// ── CPU alignment ─────────────────────────────────
+	// Match GOMAXPROCS to the container's CPU quota to avoid CFS throttling.
+	if p, err := strconv.Atoi(gomaxprocs); err == nil && p > 0 {
+		runtime.GOMAXPROCS(p)
+	}
 
 	// ── GC tuning ──────────────────────────────────────
 	// Cap memory per instance (parsed from GOMEMLIMIT env or default 70 MiB).
@@ -50,6 +57,7 @@ func main() {
 		"redis", redisAddr,
 		"port", port,
 		"gomemlimit", gomemlimit,
+		"gomaxprocs", gomaxprocs,
 		"gogc", "off",
 	)
 

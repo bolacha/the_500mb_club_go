@@ -6,7 +6,7 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-    go build -ldflags="-s -w" -o /app ./cmd/api/
+    go build -trimpath -ldflags="-s -w" -o /app ./cmd/api/
 
 FROM scratch
 COPY --from=builder /app /app
