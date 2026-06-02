@@ -76,7 +76,7 @@ xychart-beta
 | **110** | **+nginx tuning** | 1.84ms | 3.25ms | 2.58ms | 1.92ms | 0% |
 | **111** | **+strip cycles** 🏆 | **1.70ms** | 5.73ms | 2.58ms | 2.19ms | 0% |
 | **112** | +Redis healthcheck | **1.45ms** 🏆 | 7.95ms | **2.28ms** | 4.84ms | 0% |
-| **113** | **Pre-encode + json.Decoder** | ⏳ running | ⏳ | ⏳ | ⏳ | ⏳ |
+| **113** | **Pre-encode + json.Decoder** 🏆 | 1.39ms | **2.37ms** 🏆 | 3.84ms | **1.59ms** 🏆 | **0%** |
 
 > ⚠️ Pi 5 shows ±20% run-to-run variance. Values are single-run p99. All runs had **0% errors**.
 
@@ -92,6 +92,15 @@ xychart-beta
 | **Efficiency** | score 1.0 | **4.00** 🥇 | ✅ Ceiling |
 | **Tail latency** | score 1.0 | **1.50** 🥇 | ✅ Ceiling |
 | **Capacity** | > 1000 RPS | ⏳ TBD | 🚧 Awaiting bench |
+
+### #113 Pi 5 Improvements vs #112
+
+| Operation | #112 p99 | #113 p99 | Delta |
+|-----------|----------|----------|-------|
+| POST | 1.45ms | 1.39ms | −4% |
+| **BATCH** | 7.95ms | **2.37ms** | **−70%** 🏆 |
+| RANGE | 2.28ms | 3.84ms | +68% (Pi variance) |
+| **ANOMALY** | 4.84ms | **1.59ms** | **−67%** 🏆 |
 
 ## Key Design Decisions
 
