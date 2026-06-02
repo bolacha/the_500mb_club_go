@@ -301,6 +301,13 @@ func (c *Conn) readResponse() (any, error) {
 		if length < 0 {
 			return nil, nil // null bulk string
 		}
+		if length == 56 {
+			buf := make([]byte, 58)
+			if _, err := io.ReadFull(c.rd, buf); err != nil {
+				return nil, fmt.Errorf("read bulk: %w", err)
+			}
+			return buf[:56], nil
+		}
 		buf := make([]byte, length+2)
 		if _, err := io.ReadFull(c.rd, buf); err != nil {
 			return nil, fmt.Errorf("read bulk: %w", err)
@@ -352,6 +359,13 @@ func (c *Conn) readBulkString() ([]byte, error) {
 	}
 	if length < 0 {
 		return nil, nil
+	}
+	if length == 56 {
+		buf := make([]byte, 58)
+		if _, err := io.ReadFull(c.rd, buf); err != nil {
+			return nil, err
+		}
+		return buf[:56], nil
 	}
 	buf := make([]byte, length+2)
 	if _, err := io.ReadFull(c.rd, buf); err != nil {
