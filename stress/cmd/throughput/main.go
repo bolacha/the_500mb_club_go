@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"sort"
@@ -181,8 +182,7 @@ func runStep(targetRPS int, dur time.Duration) (avg, p50, p99 time.Duration, del
 }
 
 func pickOp() string {
-	// 60% POST, 10% batch, 20% range, 10% anomaly
-	r := float64(time.Now().UnixNano()%100) / 100.0
+	r := rand.Float64()
 	switch {
 	case r < 0.60:
 		return "post"

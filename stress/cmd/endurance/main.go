@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"math/rand"
 	"net/http"
 	"sort"
 	"sync"
@@ -147,7 +148,7 @@ func printSnapshot(s snapshot) {
 func sortFn(d []time.Duration) { sort.Slice(d, func(i, j int) bool { return d[i] < d[j] }) }
 
 func pickOp() string {
-	r := float64(time.Now().UnixNano()%100) / 100.0
+	r := rand.Float64()
 	switch {
 	case r < 0.60: return "post"
 	case r < 0.70: return "batch"

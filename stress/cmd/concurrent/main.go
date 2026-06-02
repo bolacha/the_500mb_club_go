@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"math/rand"
 	"net/http"
 	"sort"
 	"sync"
@@ -143,7 +144,7 @@ func seedDevice(id string) {
 }
 
 func pickOp() string {
-	r := float64(time.Now().UnixNano()%100) / 100.0
+	r := rand.Float64()
 	switch {
 	case r < 0.60:
 		return "post"

@@ -46,6 +46,9 @@ run:
 	INSTANCE_ID=dev-1 REDIS_ADDR=localhost:6379 ./bin/api
 
 # ── stress tests (match benchmark scenarios) ─────────────
+up:
+	docker compose up -d --build
+
 steady:
 	go run ./stress/cmd/steady/ -url http://localhost:8080
 
@@ -56,11 +59,14 @@ endurance:
 	go run ./stress/cmd/endurance/ -url http://localhost:8080 -dur 5m
 
 capacity:
-	go run ./stress/cmd/throughput/ -url http://localhost:8080 -start 200 -end 3000 -step 100 -dur 10s
+	go run ./stress/cmd/throughput/ -url http://localhost:8080 -start 200 -end 5000 -step 200 -dur 8s
 
-load:
-	go run ./stress/cmd/concurrent/ -url http://localhost:8080 -workers 20 -dur 30s
-	docker compose up -d --build
+concurrent:
+	go run ./stress/cmd/concurrent/ -url http://localhost:8080 -workers 50 -dur 30s
+
+# Full local benchmark: capacity + resilience + stability → score estimate
+bench-full:
+	go run ./stress/cmd/bench/ -url http://localhost:8080
 
 down:
 	docker compose down -v
@@ -68,14 +74,14 @@ down:
 logs:
 	docker compose logs -f
 
-# ── smoke / load tests ───────────────────────────────────
+# ── smoke / load tests (via k6, requires challenge repo) ──
 smoke:
 	docker compose up -d --build
 	sleep 3
 	k6 run ../the_500mb_club_challenge/test/smoke.js
 	docker compose down -v
 
-load:
+test-k6:
 	docker compose up -d --build
 	sleep 3
 	k6 run ../the_500mb_club_challenge/test/test.js
