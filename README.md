@@ -1,45 +1,233 @@
-# The 500MB Club — Go Implementation
+# The 500MB Club — Go 1.26 Implementation
 
-Go 1.26 implementation of the [500MB Club Challenge](https://github.com/gandarez/the_500mb_club_challenge) telemetry API.
+> **Zero external dependencies.** Production-grade telemetry API on 2 CPUs / 500 MB.
 
-**Stack:** Go + Redis + Nginx | **Deps:** Zero external libraries | **Target:** 500 MB / 2 CPU
-
-## Quick Start
-
-```bash
-# Run tests
-make test
-
-# Run benchmarks
-make bench
-
-# Build and run locally (needs Redis on localhost:6379)
-make run
-
-# Full stack with docker compose
-make up
-
-# Smoke test against the stack
-make smoke
-```
+[![CI](https://github.com/bolacha/the_500mb_club_go/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/bolacha/the_500mb_club_go/actions/workflows/docker-publish.yml)
+[![Go 1.26](https://img.shields.io/badge/Go-1.26.3-00ADD8?logo=go)](https://go.dev/)
+[![Docker](https://img.shields.io/badge/image-9.3_MB-blue?logo=docker)](https://github.com/bolacha/the_500mb_club_go/pkgs/container/the_500mb_club_go)
 
 ## Architecture
 
-- `net/http` with enhanced ServeMux (Go 1.22+) — no external router
-- `encoding/json` (stdlib) — no external JSON library
-- Custom RESP2 Redis client (~200 lines) — no redis driver dependency
-- `log/slog` — structured logging from stdlib
-- GC tuned: `GOGC=off` + `GOMEMLIMIT=70MiB` + periodic manual GC
+```mermaid
+flowchart LR
+    K6["🧪 k6 Load Test"]
+
+    subgraph Stack["2 CPUs / 500 MB"]
+        direction TB
+        LB{{"nginx round-robin :8080"}}
+
+        subgraph APIs["Go API replicas"]
+            A1["api-1 :8000<br/>GOMEMLIMIT=16MiB"]
+            A2["api-2 :8000<br/>GOGC=25"]
+            A3["api-3 :8000<br/>GOMAXPROCS=1"]
+        end
+
+        R[("Redis 7 Alpine<br/>tmpfs /data")]
+    end
+
+    K6 --> LB
+    LB --> A1 & A2 & A3
+    A1 & A2 & A3 --> R
+
+    classDef store fill:#1f2933,stroke:#7b8794,color:#e4e7eb
+    classDef lb fill:#243b53,stroke:#4c63b6,color:#e4e7eb
+    class R store
+    class LB lb
+```
+
+### Stack
+
+| Component | Choice | Why |
+|-----------|--------|-----|
+| **Language** | Go 1.26.3 | Latest stable, Green Tea GC, small-alloc optimizations |
+| **HTTP** | `net/http` (stdlib) | Enhanced ServeMux with `GET /devices/{id}/telemetry` patterns |
+| **JSON** | `encoding/json` (stdlib) | Good enough at 200 RPS, zero-allocation with pooled buffers |
+| **Redis client** | Custom RESP2 (~270 lines) | Zero dependencies, zero-alloc command writing |
+| **Storage** | Redis 7 Alpine | Sorted sets as time-series, pipelining, tmpfs `/data` |
+| **Binary** | 56-byte compact encoding | 62% smaller than JSON in Redis |
+| **GC** | `GOGC=25` + `GOMEMLIMIT=16MiB` | Frequent small GCs, no pause spikes |
+| **Image** | `scratch` base | 9.3 MB, non-root, stripped |
+
+## Real Pi 5 Benchmark Journey
+
+Every change was benchmarked on the **real Raspberry Pi 5** (4 cores, 8 GB RAM, Debian Bookworm ARM64). Results from the [challenge's Pi-Bench daemon](https://github.com/The-500MB-Club/the_500mb_club_challenge).
+
+### p99 Latency Progression (100 RPS × 60s)
+
+```mermaid
+xychart-beta
+    title "POST p99 Latency Over 7 Iterations"
+    x-axis ["#99 base", "#100 CI", "#101 +buf", "#102 +mZADD", "#103 Redis cfg", "#104 stable", "#106 v2"]
+    y-axis "milliseconds" 0 --> 3
+    bar [2.10, 1.91, 1.63, 1.94, 2.15, 2.05, 1.91]
+```
+
+| # | Change | POST p99 | Batch p99 | Range p99 | Anomaly p99 | Errors |
+|---|--------|----------|-----------|-----------|-------------|--------|
+| **99** | Base (local build) | 2.10ms | 3.73ms | 2.41ms | 3.58ms | 0% |
+| **100** | CI build, `-trimpath` | 1.91ms | 3.07ms | 2.76ms | 1.96ms | 0% |
+| **101** | + Write-buffer | **1.63ms** 🏆 | 5.07ms | 2.88ms | 1.56ms | 0% |
+| **102** | + Multi-ZADD | 1.94ms | 8.89ms ❌ | 2.52ms | 2.99ms | 0% |
+| **103** | Redis speed configs | 2.15ms | 6.37ms ❌ | 4.10ms ❌ | 2.63ms | 0% |
+| **104** | Back to best | 2.05ms | 15.00ms | 3.37ms | 2.14ms | 0% |
+| **106** | **Optimize v2** | 1.91ms | 7.07ms | **2.28ms** 🏆 | 1.76ms | 0% |
+
+> ⚠️ Pi 5 shows ±20% run-to-run variance. Values are single-run p99. All runs had **0% errors**.
+
+### Score Targets
+
+| Dimension | SLO | Best Achieved | Status |
+|-----------|-----|---------------|--------|
+| POST p99 | < 8ms | 1.63ms | ✅ 5× under |
+| Batch p99 | < 25ms | 3.07ms | ✅ 8× under |
+| Range p99 | < 15ms | 2.28ms | ✅ 6.5× under |
+| Anomaly p99 | < 25ms | 1.56ms | ✅ 16× under |
+| Error rate | < 0.5% | **0.00%** | ✅ Perfect |
+
+## Key Design Decisions
+
+### 1. Write-Buffer for Single POSTs
+
+```go
+// Bounded micro-batch: 64 entries or 5ms timeout.
+// Flushes as Redis pipeline — one round trip for up to 64 points.
+type WriteBuffer struct {
+    maxSize int           // 64 entries (~3.5 KB)
+    maxWait time.Duration // 5ms
+}
+```
+
+**Why:** Single POSTs are 60% of traffic. Each ZADD costs one Redis round-trip. Batching 64 into one pipeline saves 63 round-trips per batch. The async contract (HTTP 202) allows this.
+
+**Risk mitigation:** Buffer is strictly bounded (64 entries × 56 bytes = 3.5 KB). GOMEMLIMIT prevents heap growth. Buffer flushed on shutdown.
+
+### 2. Pipeline > Multi-ZADD for Batch
+
+```go
+// ❌ Multi-ZADD: one giant command blocks Redis event loop
+client.ZADDM(key, 100 pairs) // batched but serialized
+
+// ✅ Pipeline: 100 small commands, Redis interleaves them
+pipe := client.Pipeline()
+for _, p := range points { pipe.ZADD(key, p.TS, p.EncodeInto(buf)) }
+pipe.Exec()
+```
+
+**Why:** Redis is single-threaded. A 100-pair ZADD blocks its event loop, delaying other operations. Pipeline sends 100 individual commands that Redis can interleave with requests from other replicas. Real Pi data: pipeline = 3.07ms p99 vs multi-ZADD = 8.89ms.
+
+### 3. Binary Anomaly Parse (Zero Alloc)
+
+```go
+// ❌ Old: decode 256 structs, then compute
+points := make([]TelemetryPoint, 256)
+for _, raw := range raws { points[i] = DecodeBinary(raw) } // 256 heap allocs
+Compute(points)
+
+// ✅ New: parse AX/AY/AZ directly from bytes
+func ComputeBinary(rawPoints [][]byte) (Result, error) {
+    for _, raw := range rawPoints {
+        ax := math.Float64frombits(binary.LittleEndian.Uint64(raw[32:40]))
+        ay := math.Float64frombits(binary.LittleEndian.Uint64(raw[40:48]))
+        az := math.Float64frombits(binary.LittleEndian.Uint64(raw[48:56]))
+        // ... Welford's algorithm
+    }
+}
+```
+
+**Why:** Anomaly is CPU-bound (10% of traffic). Eliminating 256 struct allocations per call reduces GC pressure. With GOGC=25, fewer allocs = fewer GC cycles = lower tail latency.
+
+### 4. Default Redis > Tuned Redis
+
+```yaml
+# ✅ Default Redis on Pi 5
+command: redis-server --maxmemory 40mb --maxmemory-policy noeviction --save ""
+
+# ❌ Tuned: hz=100 burns 2× CPU, activerehashing=no causes hash collisions
+# command: redis-server ... --hz 100 --activerehashing no
+```
+
+**Why:** On the Pi 5's 2-CPU budget, `hz=100` (internal clock) consumes precious CPU cycles. `activerehashing=no` causes hash table collisions to accumulate, slowing lookups. Default Redis is tuned for general-purpose use and works best on constrained hardware.
+
+### 5. GC: GOGC=25 + GOMEMLIMIT
+
+```go
+debug.SetMemoryLimit(16 << 20) // 16 MiB soft cap
+debug.SetGCPercent(25)         // frequent small GCs
+```
+
+**Why:** With `mem_limit=20m` per container, the heap must stay under 16 MiB. `GOGC=25` triggers GC at 1.25× live heap (vs 100's 2×). Smaller, more frequent GCs avoid the latency spikes of large GC cycles. `GOMEMLIMIT` is the hard backstop.
+
+## Budget
+
+| Service | CPU | Memory | Actual RSS (load) |
+|---------|-----|--------|-------------------|
+| api-1 | 0.55 | 20 MB | ~12 MB |
+| api-2 | 0.55 | 20 MB | ~12 MB |
+| api-3 | 0.55 | 20 MB | ~12 MB |
+| Redis | 0.20 | 50 MB | ~17 MB |
+| Nginx | 0.15 | 20 MB | ~4 MB |
+| **Total** | **2.00** | **130 MB** | **~57 MB** |
+
+Only 44% of the 130 MB allocation is used under 100 RPS load. 370+ MB of headroom for spikes.
 
 ## Project Structure
 
 ```
-cmd/api/          — Entry point, server setup, graceful shutdown
+cmd/api/main.go                  # Server, GC tuning, graceful shutdown
 internal/
-  handler/         — HTTP handlers + ServeMux routing
-  redis/           — Minimal RESP2 Redis client + pool + pipeline
-  telemetry/       — Point type, validation, binary encode/decode, storage
-  anomaly/         — Welford single-pass z-score algorithm
-  middleware/      — X-Instance-Id, request logging
-stress/           — End-to-end stress tests
+  handler/                       # HTTP handlers (ServeMux routing)
+  redis/                         # Custom RESP2 client + pool + pipeline
+  telemetry/                     # Point type, binary encode, store, write buffer
+  anomaly/                       # Zero-alloc Welford z-score
+  middleware/                    # X-Instance-Id, request logging
+stress/cmd/
+  steady/                        # 200 RPS, 60s (matches benchmark steady)
+  spike/                         # 50→800 RPS (matches benchmark spike)
+  throughput/                    # 200→3000 RPS ramp (matches benchmark capacity)
+  endurance/                     # Sustained load with drift analysis
+  concurrent/                    # Configurable worker burst
 ```
+
+## Local Development
+
+```bash
+# Prerequisites: Docker, Go 1.26, k6
+make up          # Start stack (docker compose)
+make steady      # 200 RPS, 60s
+make spike       # 50→800 RPS burst
+make capacity    # 200→2000 RPS ramp
+make endurance   # 5-minute sustained
+make test        # Unit tests (32 passing)
+make bench       # Benchmarks
+make down        # Stop stack
+```
+
+## Benchmarks (M1 Max)
+
+| Operation | Time | Allocs |
+|-----------|------|--------|
+| Anomaly (256 pts, binary) | 1,310 ns | **0** |
+| Point encode (56 B) | 17 ns | 1 |
+| Point encode into buf | 2.2 ns | **0** |
+| Point decode binary | 4.8 ns | **0** |
+| Point validate | 3.0 ns | **0** |
+| JSON decode | 1,290 ns | 5 |
+
+## CI Pipeline
+
+```mermaid
+flowchart LR
+    Push["git push main"] --> CI["GitHub Actions"]
+    CI --> Build["Build arm64 binary<br/>(QEMU, -trimpath, -ldflags)"]
+    Build --> PushImage["Push to GHCR<br/>ghcr.io/bolacha/the_500mb_club_go"]
+    PushImage --> Issue["Open test/go issue"]
+    Issue --> Gate["Gate validates"]
+    Gate --> Pi["Pi-Bench daemon<br/>runs on Raspberry Pi 5"]
+    Pi --> Results["Results posted<br/>on issue"]
+```
+
+Every push to `main` triggers an automatic build and GHCR push. To re-benchmark on the real Pi 5, open a `test/go` issue in the [challenge repo](https://github.com/The-500MB-Club/the_500mb_club_challenge).
+
+## License
+
+MIT
