@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -18,16 +17,9 @@ type Client struct {
 	pool *Pool
 }
 
-// NewClient creates a client connected to addr.
-// Supports tcp ("host:port") and unix ("unix:///path/to/socket").
+// NewClient creates a client connected to addr (e.g. "localhost:6379").
 func NewClient(addr string) (*Client, error) {
-	network := "tcp"
-	target := addr
-	if strings.HasPrefix(addr, "unix://") {
-		network = "unix"
-		target = addr[7:] // strip "unix://"
-	}
-	pool := NewPool(network, target, 16, 30*time.Second)
+	pool := NewPool(addr, 16, 30*time.Second)
 	return &Client{pool: pool}, nil
 }
 
@@ -189,8 +181,8 @@ type Conn struct {
 	rd  *bufio.Reader
 }
 
-func newConn(network, addr string, timeout time.Duration) (*Conn, error) {
-	nc, err := net.DialTimeout(network, addr, timeout)
+func newConn(addr string, timeout time.Duration) (*Conn, error) {
+	nc, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return nil, err
 	}

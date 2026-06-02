@@ -1,6 +1,6 @@
 # The 500MB Club — Go submission docker-compose
 #
-# Stack: 3 × Go API + Redis (unix socket) + Nginx round-robin LB
+# Stack: 3 × Go API + Redis + Nginx round-robin LB
 # Aggregate budget: 2 CPUs / 500 MB
 
 services:
@@ -14,7 +14,7 @@ services:
     cpus: 0.55
     environment:
       - INSTANCE_ID=api-1
-      - REDIS_ADDR=unix:///tmp/redis.sock
+      - REDIS_ADDR=storage:6379
       - GOMEMLIMIT=16MiB
       - GOMAXPROCS=1
       - PORT=8000
@@ -22,8 +22,6 @@ services:
       nofile:
         soft: 65536
         hard: 65536
-    volumes:
-      - redis-socket:/tmp
     networks: [backend]
     depends_on:
       storage:
@@ -31,25 +29,32 @@ services:
 
   api-2:
     <<: *api
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       - INSTANCE_ID=api-2
-      - REDIS_ADDR=unix:///tmp/redis.sock
+      - REDIS_ADDR=storage:6379
       - GOMEMLIMIT=16MiB
       - GOMAXPROCS=1
       - PORT=8000
 
   api-3:
     <<: *api
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       - INSTANCE_ID=api-3
-      - REDIS_ADDR=unix:///tmp/redis.sock
+      - REDIS_ADDR=storage:6379
       - GOMEMLIMIT=16MiB
       - GOMAXPROCS=1
       - PORT=8000
 
   lb:
     image: nginx:1.27-alpine
-    ports: ["8080:80"]
+    ports:
+      - "8080:80"
     mem_limit: 20m
     cpus: 0.15
     volumes:
@@ -64,18 +69,13 @@ services:
     networks: [backend]
     tmpfs:
       - /data
-    volumes:
-      - redis-socket:/tmp
     healthcheck:
-      test: ["CMD", "redis-cli", "-s", "/tmp/redis.sock", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 1s
       timeout: 2s
       retries: 5
-    command: redis-server --maxmemory 40mb --maxmemory-policy noeviction --save "" --unixsocket /tmp/redis.sock --unixsocketperm 777 --port 0
+    command: redis-server --maxmemory 40mb --maxmemory-policy noeviction --save ""
 
 networks:
   backend:
     driver: bridge
-
-volumes:
-  redis-socket:
