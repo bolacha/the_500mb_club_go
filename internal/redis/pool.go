@@ -17,13 +17,13 @@ type Pool struct {
 }
 
 // NewPool creates a connection pool of size connections to addr.
+// All connections are pre-connected eagerly.
 func NewPool(addr string, size int, timeout time.Duration) *Pool {
 	p := &Pool{
 		addr:    addr,
 		timeout: timeout,
 		ch:      make(chan *Conn, size),
 	}
-	// Pre-fill the pool.
 	for range size {
 		conn, err := newConn(addr, timeout)
 		if err != nil {

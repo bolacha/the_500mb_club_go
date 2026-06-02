@@ -85,6 +85,20 @@ func (s *Store) Query(ctx context.Context, deviceID string, from, to int64, limi
 	return points, nil
 }
 
+// LastNRaw returns the last n telemetry points as raw 56-byte blobs.
+// Use with anomaly.ComputeBinary for zero-allocation z-score.
+func (s *Store) LastNRaw(ctx context.Context, deviceID string, n int) ([][]byte, error) {
+	raw, err := s.client.ZREVRANGE(ctx, deviceKey(deviceID), 0, n-1)
+	if err != nil {
+		return nil, fmt.Errorf("zrevrange: %w", err)
+	}
+	// Reverse to chronological order.
+	for i, j := 0, len(raw)-1; i < j; i, j = i+1, j-1 {
+		raw[i], raw[j] = raw[j], raw[i]
+	}
+	return raw, nil
+}
+
 // LastN returns the last n telemetry points for a device (most recent first via ZREVRANGE).
 func (s *Store) LastN(ctx context.Context, deviceID string, n int) ([]TelemetryPoint, error) {
 	raw, err := s.client.ZREVRANGE(ctx, deviceKey(deviceID), 0, n-1)

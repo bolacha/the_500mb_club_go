@@ -92,15 +92,15 @@ func (h *Handler) handleAnomaly(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch last 256 points.
-	points, err := h.store.LastN(r.Context(), id, 256)
+	// Fetch last 256 raw bytes — zero alloc, no struct decode.
+	rawPoints, err := h.store.LastNRaw(r.Context(), id, 256)
 	if err != nil {
 		h.logger.Error("anomaly fetch failed", "device", id, "err", err)
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		return
 	}
 
-	result, err := anomaly.Compute(points)
+	result, err := anomaly.ComputeBinary(rawPoints)
 	if err != nil {
 		// Not enough samples — return 404.
 		w.Header().Set("Content-Type", "application/json")

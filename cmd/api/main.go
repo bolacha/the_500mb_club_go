@@ -37,21 +37,11 @@ func main() {
 	}
 
 	// ── GC tuning ──────────────────────────────────────
-	// Cap memory per instance (parsed from GOMEMLIMIT env or default 70 MiB).
-	// Disable automatic GC; we trigger manually.
-	gcInterval := 5 * time.Second
+	// GOMEMLIMIT caps heap; GOGC=25 triggers frequent small GCs.
+	// More responsive than GOGC=-1 + manual GC, less tail latency variance.
 	memLimit := parseMemLimit(gomemlimit)
 	debug.SetMemoryLimit(memLimit)
-	debug.SetGCPercent(-1) // disable automatic GC
-
-	go func() {
-		ticker := time.NewTicker(gcInterval)
-		defer ticker.Stop()
-		for range ticker.C {
-			runtime.GC()
-			debug.FreeOSMemory() // return unused memory to the OS
-		}
-	}()
+	debug.SetGCPercent(25)
 
 	logger.Info("starting",
 		"instance", instanceID,
@@ -59,7 +49,7 @@ func main() {
 		"port", port,
 		"gomemlimit", gomemlimit,
 		"gomaxprocs", gomaxprocs,
-		"gogc", "off",
+		"gogc", "25",
 	)
 
 	// ── Redis client ───────────────────────────────────
@@ -83,11 +73,12 @@ func main() {
 	srv = middleware.RequestLogger(logger)(srv)
 
 	server := &http.Server{
-		Addr:         ":" + port,
-		Handler:      srv,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:           ":" + port,
+		Handler:        srv,
+		ReadTimeout:    5 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 4096,
 	}
 
 	// ── graceful shutdown ──────────────────────────────

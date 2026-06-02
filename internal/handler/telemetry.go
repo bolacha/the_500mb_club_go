@@ -6,17 +6,21 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"sync"
 
 	"github.com/bolacha/the_500mb_club_go/internal/telemetry"
 )
 
-var deviceIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+var (
+	deviceIDRe  = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	bodyPool4K  = sync.Pool{New: func() any { return make([]byte, 4096) }}
+	bodyPool64K = sync.Pool{New: func() any { return make([]byte, 65536) }}
+)
 
 func validDeviceID(id string) bool {
 	return deviceIDRe.MatchString(id)
 }
 
-// telemetryBatchPayload is the JSON structure for batch ingest.
 type telemetryBatchPayload struct {
 	Points []telemetry.TelemetryPoint `json:"points"`
 }
@@ -28,12 +32,23 @@ func (h *Handler) handlePostSingle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Limit body size to 4KB for single points.
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
-	if err != nil {
+	buf := bodyPool4K.Get().([]byte)
+	n, err := io.ReadFull(r.Body, buf[:4096])
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		bodyPool4K.Put(buf)
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
+	if n == 4096 {
+		extra := make([]byte, 1)
+		if extraN, _ := r.Body.Read(extra); extraN > 0 {
+			bodyPool4K.Put(buf)
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+	}
+	body := buf[:n]
+	defer bodyPool4K.Put(buf)
 
 	point, err := telemetry.DecodeJSON(body)
 	if err != nil {
@@ -41,7 +56,6 @@ func (h *Handler) handlePostSingle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Queue to bounded write buffer — flushes as Redis pipeline when full or after 5ms.
 	h.writeBuf.Add(r.Context(), id, point)
 	h.postCount.Add(1)
 	w.WriteHeader(http.StatusAccepted)
@@ -54,11 +68,15 @@ func (h *Handler) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 65536)) // 64KB max
-	if err != nil {
+	buf := bodyPool64K.Get().([]byte)
+	n, err := io.ReadFull(r.Body, buf[:65536])
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		bodyPool64K.Put(buf)
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
+	body := buf[:n]
+	defer bodyPool64K.Put(buf)
 
 	var payload telemetryBatchPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -66,7 +84,7 @@ func (h *Handler) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n := len(payload.Points)
+	n = len(payload.Points)
 	if n < 1 {
 		http.Error(w, `{"error":"batch must contain at least 1 point"}`, http.StatusBadRequest)
 		return
@@ -77,7 +95,6 @@ func (h *Handler) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate all points before ingesting.
 	for i := range payload.Points {
 		if err := payload.Points[i].Validate(); err != nil {
 			http.Error(w, `{"error":"invalid point at index `+strconv.Itoa(i)+`: `+err.Error()+`"}`, http.StatusBadRequest)
