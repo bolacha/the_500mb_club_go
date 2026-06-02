@@ -290,29 +290,7 @@ func (c *Conn) readResponse() (any, error) {
 		return n, nil
 
 	case '$': // bulk string
-		line, err := c.readLine()
-		if err != nil {
-			return nil, err
-		}
-		length, err := strconv.Atoi(string(line))
-		if err != nil {
-			return nil, fmt.Errorf("parse bulk len: %w", err)
-		}
-		if length < 0 {
-			return nil, nil // null bulk string
-		}
-		if length == 56 {
-			buf := make([]byte, 58)
-			if _, err := io.ReadFull(c.rd, buf); err != nil {
-				return nil, fmt.Errorf("read bulk: %w", err)
-			}
-			return buf[:56], nil
-		}
-		buf := make([]byte, length+2)
-		if _, err := io.ReadFull(c.rd, buf); err != nil {
-			return nil, fmt.Errorf("read bulk: %w", err)
-		}
-		return buf[:length], nil
+		return c.readBulkData()
 
 	case '*': // array
 		line, err := c.readLine()
@@ -341,14 +319,13 @@ func (c *Conn) readResponse() (any, error) {
 	}
 }
 
+// readBulkString reads a bulk string (type byte already consumed by readResponse).
 func (c *Conn) readBulkString() ([]byte, error) {
-	typ, err := c.rd.ReadByte()
-	if err != nil {
-		return nil, err
-	}
-	if typ != '$' {
-		return nil, fmt.Errorf("expected '$', got '%c'", typ)
-	}
+	return c.readBulkData()
+}
+
+// readBulkData reads the length + data of a bulk string after the $ type byte has been consumed.
+func (c *Conn) readBulkData() ([]byte, error) {
 	line, err := c.readLine()
 	if err != nil {
 		return nil, err

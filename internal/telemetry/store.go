@@ -68,7 +68,7 @@ func (s *Store) IngestBatch(ctx context.Context, deviceID string, points []Telem
 func (s *Store) Query(ctx context.Context, deviceID string, from, to int64, limit int, cursor int64) ([]TelemetryPoint, error) {
 	// With cursor, we use (cursor as exclusive lower bound.
 	min := from
-	if cursor > 0 && cursor > min {
+	if cursor > min {
 		// Use exclusive range: add 1 to skip the cursor value itself.
 		min = cursor + 1
 	}
