@@ -78,7 +78,7 @@ xychart-beta
 
 > ⚠️ Pi 5 shows ±20% run-to-run variance. Values are single-run p99. All runs had **0% errors**.
 
-### Score Targets
+## Score Targets
 
 | Dimension | SLO | Best Achieved | Status |
 |-----------|-----|---------------|--------|
@@ -180,6 +180,28 @@ proxy_socket_keepalive on;
 ```
 
 **Why:** Default nginx opens a new TCP connection to the backend per request. `keepalive 32` reuses connections, eliminating TCP handshake overhead. `proxy_buffering off` passes data without copying through nginx's buffer. **Docker Desktop result: spike p99 dropped 38% (7.5ms → 4.7ms).** Unix socket was also tested but showed no benefit on real Pi 5.
+
+### 8. Anomaly Detection — How It Works
+
+```
+GET /devices/{id}/anomaly
+
+k6 request → API fetches last 256 raw bytes from Redis (ZREVRANGE)
+           → parses ax/ay/az directly from binary (zero alloc)
+           → computes magnitude = √(ax² + ay² + az²) per point
+           → runs Welford's single-pass algorithm (numerically stable)
+           → returns z-score, mean, stddev, anomalous flag
+```
+
+| Field | Meaning |
+|-------|---------|
+| `z_score` | Standard deviations from the mean. \|z\| > 3 = anomalous |
+| `anomalous` | `true` if \|z\| > 3 (likely crash or impact event) |
+| `samples` | Points used (0-256). < 8 returns HTTP 404 |
+| `mean` | Average magnitude (~9.81 m/s² = Earth's gravity) |
+| `stddev` | Standard deviation (near 0 for stable sensors) |
+
+The challenge spec mandates exactly 256 points per call — no caching allowed. Our zero-alloc binary parse computes it in **1.3µs per call** (M1 Max), well under the p99 target.
 
 ## Budget
 
