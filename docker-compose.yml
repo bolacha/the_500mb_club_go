@@ -2,6 +2,10 @@
 #
 # Stack: 3 × Go API + Redis + Nginx round-robin LB
 # Aggregate budget: 2 CPUs / 500 MB
+#
+# NOTE: internal: true removed for Docker Desktop compatibility.
+# On real Raspberry Pi (native Linux Docker), add `internal: true` to the
+# backend network for extra security — it doesn't block port publishing there.
 
 services:
   api-1: &api
@@ -37,7 +41,8 @@ services:
 
   lb:
     image: nginx:1.27-alpine
-    ports: ["8080:80"]
+    ports:
+      - "8080:80"
     mem_limit: 20m
     cpus: 0.15
     volumes:
@@ -59,4 +64,4 @@ services:
 
 networks:
   backend:
-    internal: true
+    driver: bridge
