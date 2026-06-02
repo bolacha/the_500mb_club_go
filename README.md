@@ -75,6 +75,8 @@ xychart-beta
 | **109** | +Unix socket | 1.92ms | 8.96ms | 2.41ms | 1.76ms | 0% |
 | **110** | **+nginx tuning** | 1.84ms | 3.25ms | 2.58ms | 1.92ms | 0% |
 | **111** | **+strip cycles** 🏆 | **1.70ms** | 5.73ms | 2.58ms | 2.19ms | 0% |
+| **112** | +Redis healthcheck | **1.45ms** 🏆 | 7.95ms | **2.28ms** | 4.84ms | 0% |
+| **113** | **Pre-encode + json.Decoder** | ⏳ running | ⏳ | ⏳ | ⏳ | ⏳ |
 
 > ⚠️ Pi 5 shows ±20% run-to-run variance. Values are single-run p99. All runs had **0% errors**.
 
@@ -82,28 +84,32 @@ xychart-beta
 
 | Dimension | SLO | Best Achieved | Status |
 |-----------|-----|---------------|--------|
-| POST p99 | < 8ms | 1.63ms | ✅ 5× under |
+| POST p99 | < 8ms | **1.45ms** | ✅ 5.5× under |
 | Batch p99 | < 25ms | 3.07ms | ✅ 8× under |
 | Range p99 | < 15ms | 2.28ms | ✅ 6.5× under |
 | Anomaly p99 | < 25ms | 1.56ms | ✅ 16× under |
 | Error rate | < 0.5% | **0.00%** | ✅ Perfect |
+| **Efficiency** | score 1.0 | **4.00** 🥇 | ✅ Ceiling |
+| **Tail latency** | score 1.0 | **1.50** 🥇 | ✅ Ceiling |
+| **Capacity** | > 1000 RPS | ⏳ TBD | 🚧 Awaiting bench |
 
 ## Key Design Decisions
 
 ### 1. Write-Buffer for Single POSTs
 
 ```go
-// Bounded micro-batch: 64 entries or 5ms timeout.
-// Flushes as Redis pipeline — one round trip for up to 64 points.
+// Bounded micro-batch: 128 entries or 10ms timeout.
+// Points are pre-encoded to 56-byte binary at Add time —
+// zero encoding work at pipeline flush.
 type WriteBuffer struct {
-    maxSize int           // 64 entries (~3.5 KB)
-    maxWait time.Duration // 5ms
+    maxSize int           // 128 entries (~7 KB)
+    maxWait time.Duration // 10ms
 }
 ```
 
-**Why:** Single POSTs are 60% of traffic. Each ZADD costs one Redis round-trip. Batching 64 into one pipeline saves 63 round-trips per batch. The async contract (HTTP 202) allows this.
+**Why:** Single POSTs are 60% of traffic. Each ZADD costs one Redis round-trip. Batching 128 into one pipeline saves 127 round-trips per batch. Pre-encoding at Add time eliminates the EncodeInto hot path during flush. The async contract (HTTP 202) allows this.
 
-**Risk mitigation:** Buffer is strictly bounded (64 entries × 56 bytes = 3.5 KB). GOMEMLIMIT prevents heap growth. Buffer flushed on shutdown.
+**Risk mitigation:** Buffer is strictly bounded (128 entries × 56 bytes = 7 KB). GOMEMLIMIT (16 MiB) prevents heap growth. Buffer flushed on shutdown.
 
 ### 2. Pipeline > Multi-ZADD for Batch
 
