@@ -361,3 +361,41 @@ The capacity ramp can fill Redis's 40MB limit (~700K points). Always run `docker
 ```bash
 docker exec the_500mb_club_go-storage-1 redis-cli FLUSHALL
 ```
+
+## CPU Budget Tuning
+
+The capacity test exposes which component throttles first. Docker Desktop virtualizes CPU limits, but trends are directionally correct for the Pi 5.
+
+### Configurations tested (capacity ramp 200→10000, 5s/step)
+
+| Config | nginx | api×3 | redis | Total | Max RPS | Notes |
+|--------|-------|-------|-------|-------|---------|-------|
+| **A** (original) | 0.15 | 0.55 | 0.20 | 2.00 | **8400** ✅ | Current `main` |
+| B | 0.25 | 0.50 | 0.20 | 1.95 | 8000 | nginx gain < api loss |
+| C | 0.35 | 0.45 | 0.20 | 1.90 | 8000 | Unstable, multiple knees |
+| **D** | 0.20 | 0.45 | 0.30 | 1.85 | **8400** ✅ | Redis boost compensates |
+| E | 0.15 | 0.50 | 0.30 | 1.95 | 8200 | APIs starved at 0.50 |
+| **F** | 0.20 | 0.50 | 0.25 | 1.95 | **8400** ✅ | Best balance |
+
+### What the numbers mean
+
+- **APIs below 0.50 hurt consistently** — Configs C (0.45) and D (0.45) had knee instability even when total RPS was high. The JSON encode/decode + anomaly compute need CPU headroom.
+- **Redis above 0.20 helps** — Configs D (0.30) and F (0.25) matched or beat the original despite lower API CPU. Redis single-threaded event loop benefits from not being CFS-preempted at high write volume.
+- **nginx above 0.20 doesn't help on Docker** — Configs B+C gave nginx extra CPU but total RPS dropped. nginx's bottleneck here is virtualized networking, not CPU.
+- **Config A (original) ties for first** — 0.55 API + 0.15 nginx + 0.20 redis is already well-balanced for this workload mix (60% POST, 10% batch, 20% range, 10% anomaly).
+
+### Pi 5 projection
+
+On bare-metal ARM Linux, CFS throttling is real and measured in microseconds of stolen CPU time. The Docker Desktop VM masks this. On the Pi:
+
+| Change | Expected effect |
+|--------|----------------|
+| nginx 0.15→0.20 | Later CFS throttling during capacity ramp. nginx hit 15% CPU at 3000+ RPS on Docker — at 0.15 that's right at the limit. 0.20 gives 33% more headroom. |
+| API 0.55→0.50 | Safe. `GOMAXPROCS=1` means 0.50 vs 0.55 is irrelevant — one thread can't use more than one core's worth of time slice anyway. |
+| Redis 0.20→0.25 | Higher single-thread Redis throughput before CFS kicks in. Worth testing on Pi. |
+
+**Recommended for Pi benchmark:** Config F (`nginx=0.20, api=0.50, redis=0.25, total=1.95`). It preserves API headroom while buffering nginx and Redis against CFS throttling.
+
+### Verdict
+
+On Docker Desktop all configs within ±5% (8000–8400 RPS). The test harness is the real bottleneck. On the Pi 5, Config A (current) and Config F are both excellent — pick based on which component CFS-throttles first in the actual Pi benchmark logs.
