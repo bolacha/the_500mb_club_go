@@ -32,6 +32,7 @@ var (
 	endRPS     = flag.Int("end", 2000, "Ending RPS")
 	stepRPS    = flag.Int("step", 100, "RPS increment per step")
 	stepDur    = flag.Duration("dur", 15*time.Second, "Duration per step")
+	workers    = flag.Int("workers", 0, "Number of goroutines (0=auto: max(1, RPS/500))")
 	p99Target  = flag.Duration("p99", 150*time.Millisecond, "p99 latency SLO")
 	errTarget  = flag.Float64("err", 0.005, "Max error rate (0.5%)")
 )
@@ -127,38 +128,44 @@ func runStep(targetRPS int, dur time.Duration) (avg, p50, p99 time.Duration, del
 	var errCount atomic.Int64
 	var okCount atomic.Int64
 
-	// Calculate interval between requests to achieve target RPS.
-	interval := time.Second / time.Duration(targetRPS)
+	// Auto-scale workers: 1 per 500 RPS, minimum 4.
+	n := *workers
+	if n <= 0 {
+		n = max(4, targetRPS/500)
+	}
 
-	// Mix: 60% POST, 10% batch, 20% range, 10% anomaly.
 	deadline := time.Now().Add(dur)
 	var wg sync.WaitGroup
 
-	// Single worker goroutine firing at the target rate.
-	wg.Go(func() {
-		for time.Now().Before(deadline) {
-			t0 := time.Now()
-			op := pickOp()
-			url, body := buildRequest(op)
-			resp, err := doRequest(url, body)
-			lat := time.Since(t0)
+	for range n {
+		wg.Go(func() {
+			// Each worker fires at (targetRPS / n) rate.
+			workerRPS := targetRPS / n
+			interval := time.Second / time.Duration(workerRPS)
+			for time.Now().Before(deadline) {
+				t0 := time.Now()
+				op := pickOp()
+				url, body := buildRequest(op)
+				resp, err := doRequest(url, body)
+				lat := time.Since(t0)
 
-			mu.Lock()
-			samples = append(samples, latencySample{lat})
-			mu.Unlock()
+				mu.Lock()
+				samples = append(samples, latencySample{lat})
+				mu.Unlock()
 
-			if err != nil || (resp != nil && resp.StatusCode >= 400) {
-				errCount.Add(1)
-			} else {
-				okCount.Add(1)
+				if err != nil || (resp != nil && resp.StatusCode >= 400) {
+					errCount.Add(1)
+				} else {
+					okCount.Add(1)
+				}
+				if resp != nil {
+					resp.Body.Close()
+				}
+
+				time.Sleep(interval)
 			}
-			if resp != nil {
-				resp.Body.Close()
-			}
-
-			time.Sleep(interval)
-		}
-	})
+		})
+	}
 	wg.Wait()
 
 	delivered = int(okCount.Load())

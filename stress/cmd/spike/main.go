@@ -25,6 +25,7 @@ var (
 	peakRPS    = flag.Int("peak", 800, "Peak RPS during spike")
 	rampDur    = flag.Duration("ramp", 10*time.Second, "Ramp duration")
 	peakDur    = flag.Duration("hold", 30*time.Second, "Hold duration at peak")
+	workers    = flag.Int("workers", 4, "Number of goroutines")
 )
 
 func main() {
@@ -98,27 +99,36 @@ func main() {
 
 func fireRequests(device string, rps int, dur time.Duration, latencies *[]time.Duration, mu *sync.Mutex, okCount, errCount *atomic.Int64) {
 	if rps <= 0 { return }
-	interval := time.Second / time.Duration(rps)
+	n := *workers
+	workerRPS := rps / n
+	interval := time.Second / time.Duration(workerRPS)
 	deadline := time.Now().Add(dur)
-	for time.Now().Before(deadline) {
-		t0 := time.Now()
-		op := pickOpSteady()
-		url, body := buildReq(device, op)
-		resp, err := doReq(url, body)
-		lat := time.Since(t0)
 
-		mu.Lock()
-		*latencies = append(*latencies, lat)
-		mu.Unlock()
+	var wg sync.WaitGroup
+	for range n {
+		wg.Go(func() {
+			for time.Now().Before(deadline) {
+				t0 := time.Now()
+				op := pickOpSteady()
+				url, body := buildReq(device, op)
+				resp, err := doReq(url, body)
+				lat := time.Since(t0)
 
-		if err != nil || (resp != nil && resp.StatusCode >= 400) {
-			errCount.Add(1)
-		} else {
-			okCount.Add(1)
-		}
-		if resp != nil { resp.Body.Close() }
-		time.Sleep(interval)
+				mu.Lock()
+				*latencies = append(*latencies, lat)
+				mu.Unlock()
+
+				if err != nil || (resp != nil && resp.StatusCode >= 400) {
+					errCount.Add(1)
+				} else {
+					okCount.Add(1)
+				}
+				if resp != nil { resp.Body.Close() }
+				time.Sleep(interval)
+			}
+		})
 	}
+	wg.Wait()
 }
 
 func pickOpSteady() string {

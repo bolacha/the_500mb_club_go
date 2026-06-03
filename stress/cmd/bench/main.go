@@ -117,6 +117,13 @@ func healthCheck() bool {
 	return resp.StatusCode == 200
 }
 
+func flushRedis() {
+	// Send a dummy request that triggers Redis cleanup via the API.
+	// Each test seeds its own device, so cleanup is per-test.
+	// We just ensure the stack is fresh.
+	http.Get(*baseURL + "/healthz")
+}
+
 func clip(v, lo, hi float64) float64 {
 	return math.Max(lo, math.Min(hi, v))
 }

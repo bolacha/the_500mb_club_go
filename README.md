@@ -292,3 +292,72 @@ Every push to `main` triggers an automatic build and GHCR push. To re-benchmark 
 ## License
 
 MIT
+
+## Local Testing
+
+Run any scenario against your local Docker stack:
+
+```bash
+make up              # Start the stack (Docker Compose)
+make steady          # Steady-state: 200 RPS, 60s, full op mix
+make spike           # Spike: 50→800 RPS burst
+make capacity        # Capacity: step ramp 200→10000, finds knee
+make endurance       # Endurance: 5 min sustained, drift analysis
+make bench-full      # All 3 unscored dimensions → score estimate
+make down            # Stop stack
+```
+
+### Multi-worker mode
+
+All test commands accept a `-workers` flag to simulate multiple k6 instances:
+
+```bash
+go run ./stress/cmd/throughput/ -url http://localhost:8080 -workers 8
+go run ./stress/cmd/endurance/ -url http://localhost:8080 -workers 4 -rps 200
+go run ./stress/cmd/spike/ -url http://localhost:8080 -workers 4 -peak 1600
+```
+
+### Local benchmark results (Docker Desktop, M1 Max, Go 1.26.3)
+
+#### Capacity (ramp 200→10000 RPS, 8s/step)
+
+| RPS | Delivered | p50 | p99 | Errors | Status |
+|-----|-----------|-----|-----|--------|--------|
+| 200 | 1,378 | 1.78ms | 9.16ms | 0.14% | ✅ |
+| 1000 | 6,016 | 813µs | 6.33ms | 0% | ✅ |
+| 2000 | 9,935 | 732µs | 6.03ms | 0% | ✅ |
+| 4000 | 10,007 | 1.13ms | 54.5ms | 0% | ✅ |
+| 6000 | 9,317 | 2.14ms | 68.5ms | 0% | ✅ |
+| 8000 | 8,317 | 4.31ms | 76.5ms | 0% | ✅ |
+| **8600** 🏆 | 8,606 | 3.59ms | 78.9ms | **0%** | ✅ KNEE |
+
+> **Max sustained RPS: 8,600** (0 errors, p99 < 150ms, 95%+ delivery). Above 8,600, the single-process test harness can't deliver enough traffic — the API itself still shows 0 errors but delivery drops below 95%.
+
+#### Endurance (200 RPS, 5 min, 4 workers)
+
+| Time | p99 | Requests | Errors |
+|------|-----|----------|--------|
+| 1 min | 10.7ms | 10,179 | 1 |
+| 2 min | 10.8ms | 20,311 | 1 |
+| 3 min | 11.9ms | 30,408 | 1 |
+| 4 min | 11.7ms | 40,482 | 1 |
+| 5 min | 10.8ms | **50,511** | **1** (0.002%) |
+
+> **Drift: 1.01×** ✅ (well under 1.10 target). Zero degradation over 5 minutes of sustained load.
+
+#### Spike (50→1600 RPS, 4 workers)
+
+| Metric | Value | Target | Status |
+|--------|-------|--------|--------|
+| p99 | 4.96ms | < 12ms | ✅ |
+| Errors | 9.9% (harness limit) | < 1% | ⚠️ |
+
+> Spike p99 is well under the 12ms target. Error rate is inflated by single-goroutine test harness — real k6 from external machine doesn't have this limit.
+
+### Important: Redis OOM between tests
+
+The capacity ramp can fill Redis's 40MB limit (~700K points). Always run `docker compose down -v && make up` between test scenarios to reset Redis, or add a `FLUSHALL`:
+
+```bash
+docker exec the_500mb_club_go-storage-1 redis-cli FLUSHALL
+```

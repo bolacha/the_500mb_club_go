@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"net/http"
@@ -22,6 +23,8 @@ var (
 	baseURL    = flag.String("url", "http://localhost:8080", "API base URL")
 	duration   = flag.Duration("dur", 5*time.Minute, "Test duration")
 	reportFreq = flag.Duration("report", 30*time.Second, "Report frequency")
+	rps        = flag.Int("rps", 200, "Target RPS")
+	workers    = flag.Int("workers", 4, "Number of goroutines")
 )
 
 type snapshot struct {
@@ -38,7 +41,7 @@ func main() {
 	fmt.Println("╔══════════════════════════════════════════════╗")
 	fmt.Println("║   ENDURANCE TEST (matches benchmark)        ║")
 	fmt.Println("╚══════════════════════════════════════════════╝")
-	fmt.Printf("URL: %s  |  Duration: %v  |  Report: %v\n\n", *baseURL, *duration, *reportFreq)
+	fmt.Printf("URL: %s  |  Duration: %v  |  RPS: %d  |  Workers: %d  |  Report: %v\n\n", *baseURL, *duration, *rps, *workers, *reportFreq)
 
 	seedDevice(device)
 
@@ -70,28 +73,37 @@ func main() {
 		}
 	}()
 
-	// Fire at steady rate.
-	interval := time.Second / 200
+	// Fire at steady rate with multiple workers.
+	var loadWG sync.WaitGroup
+	n := *workers
+	workerRPS := *rps / n
+	interval := time.Second / time.Duration(workerRPS)
 	deadline := start.Add(*duration)
-	for time.Now().Before(deadline) {
-		t0 := time.Now()
-		op := pickOp()
-		url, body := buildReq(device, op)
-		resp, err := doReq(url, body)
-		lat := time.Since(t0)
 
-		mu.Lock()
-		curLatencies = append(curLatencies, lat)
-		mu.Unlock()
+	for range n {
+		loadWG.Go(func() {
+			for time.Now().Before(deadline) {
+				t0 := time.Now()
+				op := pickOp()
+				url, body := buildReq(device, op)
+				resp, err := doReq(url, body)
+				lat := time.Since(t0)
 
-		if err != nil || (resp != nil && resp.StatusCode >= 400) {
-			errCount.Add(1)
-		} else {
-			okCount.Add(1)
-		}
-		if resp != nil { resp.Body.Close() }
-		time.Sleep(interval)
+				mu.Lock()
+				curLatencies = append(curLatencies, lat)
+				mu.Unlock()
+
+				if err != nil || (resp != nil && resp.StatusCode >= 400) {
+					errCount.Add(1)
+				} else {
+					okCount.Add(1)
+				}
+				drainClose(resp)
+				time.Sleep(interval)
+			}
+		})
 	}
+	loadWG.Wait()
 
 	// Final snapshot for remaining.
 	mu.Lock()
@@ -187,6 +199,13 @@ func buildReq(device, op string) (string, []byte) {
 		return fmt.Sprintf("%s/telemetry?from=%d&to=%d&limit=50", base, now-60000, now), nil
 	default:
 		return base + "/anomaly", nil
+	}
+}
+
+func drainClose(resp *http.Response) {
+	if resp != nil {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 	}
 }
 
