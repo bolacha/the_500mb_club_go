@@ -77,6 +77,7 @@ xychart-beta
 | **111** | **+strip cycles** 🏆 | **1.70ms** | 5.73ms | 2.58ms | 2.19ms | 0% |
 | **112** | +Redis healthcheck | **1.45ms** 🏆 | 7.95ms | **2.28ms** | 4.84ms | 0% |
 | **113** | **Pre-encode + json.Decoder** 🏆 | 1.39ms | **2.37ms** 🏆 | 3.84ms | **1.59ms** 🏆 | **0%** |
+| **114** | Config F + nginx tune | 1.39ms | 5.22ms | **2.16ms** 🏆 | 1.91ms | **0%** |
 
 > ⚠️ Pi 5 shows ±20% run-to-run variance. Values are single-run p99. All runs had **0% errors**.
 
@@ -101,6 +102,17 @@ xychart-beta
 | **BATCH** | 7.95ms | **2.37ms** | **−70%** 🏆 |
 | RANGE | 2.28ms | 3.84ms | +68% (Pi variance) |
 | **ANOMALY** | 4.84ms | **1.59ms** | **−67%** 🏆 |
+
+### #114 vs #113 (Config F + nginx tuning)
+
+| Operation | #113 p99 | #114 p99 | Delta |
+|-----------|----------|----------|-------|
+| POST | 1.39ms | 1.39ms | 0% |
+| BATCH | 2.37ms | 5.22ms | +120% (Pi variance) |
+| **RANGE** | 3.84ms | **2.16ms** | **−44%** 🏆 |
+| ANOMALY | 1.59ms | 1.91ms | +20% (Pi variance) |
+
+> **Verdict:** #113 remains the best overall run. Config F + nginx tuning (#114) improved RANGE but BATCH/ANOMALY regressed due to ±20% Pi run-to-run variance. Keep the code from #113 (pre-encode + warm-up), deploy with Config F CPU budget for safety margin on real hardware.
 
 ## Key Design Decisions
 
@@ -398,4 +410,6 @@ On bare-metal ARM Linux, CFS throttling is real and measured in microseconds of 
 
 ### Verdict
 
-On Docker Desktop all configs within ±5% (8000–8400 RPS). The test harness is the real bottleneck. On the Pi 5, Config A (current) and Config F are both excellent — pick based on which component CFS-throttles first in the actual Pi benchmark logs.
+**#113 (pre-encode + warm-up) is the best Pi 5 run** — BATCH p99 −70%, ANOMALY p99 −67%. Config F CPU rebalance (#114) didn't clearly improve on Pi due to ±20% run-to-run variance.
+
+**Keep**: Code from #113, Config F budget (`nginx=0.20, api=0.50, redis=0.25`) as safety margin. On Docker Desktop all configs within ±5% (8000–8400 RPS) — the test harness is the bottleneck. Real capacity score awaits the Pi's capacity/spike/endurance benchmark scenarios.
