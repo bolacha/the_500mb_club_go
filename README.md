@@ -121,6 +121,8 @@ xychart-beta
 | **#113** 🏆 (warm-up + pre-encode) | **1.39** | **2.37** | 3.84 | **1.59** | 4.0 | 1.5 |
 | #114 (Config F, outlier) | 1.39 | 5.22 | 2.16 | 1.91 | 4.0 | 1.5 |
 | #124 (Config F, rerun) | 1.60 | 3.02 | 2.45 | 1.67 | 4.0 | 1.5 |
+| **#125** (tie-safe cursor) | 1.50 | 4.66 | **2.04** 🏆 | 1.80 | 4.0 | 1.5 |
+| **#130** (bounded retention) 🏆 | **1.33** 🏆 | 4.70 | 2.20 | **1.30** 🏆 | 4.0 | 1.5 |
 
 ## Endurance: 2000 RPS × 45 Minutes
 
@@ -167,6 +169,21 @@ Budget: Redis 200MB + 3×API 60MB + nginx 20MB = **280MB** (56% of 500MB cap).
 ### RESP2 array response fix
 
 Fixed a bug where `readBulkString` skipped the `$` type byte when parsing array (ZRANGEBYSCORE/ZREVRANGE) responses. Was silently causing `strconv.Atoi: parsing "$56": invalid syntax` on range and anomaly queries under load.
+
+### Bounded per-device retention
+
+After each write batch, `ZREMRANGEBYRANK` trims the device's sorted set to the newest 1024 points. Rides the same pipeline as writes — zero extra Redis round-trips. Memory bounded at ~57KB per device regardless of RPS or run duration:
+
+```
+WriteBuffer flush pipeline:
+  ZADD dev-1 score1 m1 ... scoreN mN   ← write points
+  ZREMRANGEBYRANK dev-1 0 -(1025)      ← trim to 1024
+  ZADD dev-2 ...
+  ZREMRANGEBYRANK dev-2 ...
+  → one Exec(), one round-trip
+```
+
+At 50 devices, total Redis memory stays at ~3MB — never approaches the 150MB maxmemory ceiling even under indefinite 2000 RPS load.
 
 ## Key Design Decisions
 
