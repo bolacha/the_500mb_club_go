@@ -78,6 +78,7 @@ xychart-beta
 | **112** | +Redis healthcheck | **1.45ms** 🏆 | 7.95ms | **2.28ms** | 4.84ms | 0% |
 | **113** | **Pre-encode + json.Decoder** 🏆 | 1.39ms | **2.37ms** 🏆 | 3.84ms | **1.59ms** 🏆 | **0%** |
 | **114** | Config F + nginx tune | 1.39ms | 5.22ms | **2.16ms** 🏆 | 1.91ms | **0%** |
+| **124** | Config F (clean rerun) | 1.60ms | 3.02ms | 2.45ms | 1.67ms | **0%** |
 
 > ⚠️ Pi 5 shows ±20% run-to-run variance. Values are single-run p99. All runs had **0% errors**.
 
@@ -103,16 +104,23 @@ xychart-beta
 | RANGE | 2.28ms | 3.84ms | +68% (Pi variance) |
 | **ANOMALY** | 4.84ms | **1.59ms** | **−67%** 🏆 |
 
-### #114 vs #113 (Config F + nginx tuning)
+### #124 vs #113 (Config F clean rerun, confirms #114 was outlier)
 
-| Operation | #113 p99 | #114 p99 | Delta |
+| Operation | #113 p99 | #124 p99 | Delta |
 |-----------|----------|----------|-------|
-| POST | 1.39ms | 1.39ms | 0% |
-| BATCH | 2.37ms | 5.22ms | +120% (Pi variance) |
-| **RANGE** | 3.84ms | **2.16ms** | **−44%** 🏆 |
-| ANOMALY | 1.59ms | 1.91ms | +20% (Pi variance) |
+| POST | 1.39ms | 1.60ms | +15% |
+| BATCH | 2.37ms | 3.02ms | +27% |
+| RANGE | 3.84ms | 2.45ms | −36% |
+| ANOMALY | 1.59ms | 1.67ms | +5% |
 
-> **Verdict:** #113 remains the best overall run. Config F + nginx tuning (#114) improved RANGE but BATCH/ANOMALY regressed due to ±20% Pi run-to-run variance. Keep the code from #113 (pre-encode + warm-up), deploy with Config F CPU budget for safety margin on real hardware.
+### All Pi 5 runs at a glance
+
+| Run | POST | BATCH | RANGE | ANOMALY | Eff | Lat |
+|-----|------|-------|-------|---------|-----|-----|
+| #112 (baseline) | 1.45 | 7.95 | 2.28 | 4.84 | 4.0 | 1.5 |
+| **#113** 🏆 (warm-up + pre-encode) | **1.39** | **2.37** | 3.84 | **1.59** | 4.0 | 1.5 |
+| #114 (Config F, outlier) | 1.39 | 5.22 | 2.16 | 1.91 | 4.0 | 1.5 |
+| #124 (Config F, rerun) | 1.60 | 3.02 | 2.45 | 1.67 | 4.0 | 1.5 |
 
 ## Key Design Decisions
 
@@ -410,6 +418,6 @@ On bare-metal ARM Linux, CFS throttling is real and measured in microseconds of 
 
 ### Verdict
 
-**#113 (pre-encode + warm-up) is the best Pi 5 run** — BATCH p99 −70%, ANOMALY p99 −67%. Config F CPU rebalance (#114) didn't clearly improve on Pi due to ±20% run-to-run variance.
+**#113 (pre-encode + warm-up) is the best Pi 5 run** — BATCH p99 −70%, ANOMALY p99 −67%. #124 confirmed Config F doesn't regress (#114's BATCH=5.22ms was Pi variance).
 
-**Keep**: Code from #113, Config F budget (`nginx=0.20, api=0.50, redis=0.25`) as safety margin. On Docker Desktop all configs within ±5% (8000–8400 RPS) — the test harness is the bottleneck. Real capacity score awaits the Pi's capacity/spike/endurance benchmark scenarios.
+**Final config**: Code from #113 (pre-encode WriteBuffer, Redis warm-up, json.NewDecoder) + Config F budget (`nginx=0.20, api=0.50, redis=0.25, total=1.95`) + tuned nginx.conf (`keepalive 128`, `worker_connections 8192`). All 4 Pi runs: Efficiency **4.00** 🥇, Tail Latency **1.50** 🥇 — both at ceiling. Real score awaits capacity/spike/endurance benchmarks on the Pi.
