@@ -123,16 +123,23 @@ func (wb *WriteBuffer) flushLocked(ctx context.Context) {
 func (wb *WriteBuffer) flushEntries(ctx context.Context, entries []bufferEntry) {
 	pipe, err := wb.store.client.Pipeline(ctx)
 	if err != nil {
-		return // drop on floor — spec allows async persistence
+		return
 	}
 
-	// Queue all ZADDs using pre-encoded data — zero encoding work.
+	// Queue all ZADDs using pre-encoded data, then trim each device.
+	seen := make(map[string]bool, 16)
 	for _, e := range entries {
 		pipe.ZADD(deviceKey(e.deviceID), e.score, e.data)
+		seen[e.deviceID] = true
+	}
+
+	// Trim each device to its newest retainPerDevice points.
+	// Rides the same pipeline — no extra round-trip.
+	for dev := range seen {
+		pipe.ZREMRANGEBYRANK(deviceKey(dev), 0, -(retainPerDevice + 1))
 	}
 
 	pipe.Exec(ctx)
-	// Errors are silently dropped — async persistence model.
 }
 
 // acquireBuf returns a pooled buffer if available, or a fresh one.

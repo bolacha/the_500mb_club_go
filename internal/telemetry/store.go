@@ -7,6 +7,8 @@ import (
 	"github.com/bolacha/the_500mb_club_go/internal/redis"
 )
 
+const retainPerDevice = 1024 // keep newest 1024 points per device
+
 // Store handles Redis-backed telemetry point storage.
 type Store struct {
 	client *redis.Client
@@ -30,27 +32,36 @@ func (s *Store) IngestSingle(ctx context.Context, deviceID string, p TelemetryPo
 	return err
 }
 
-// IngestBatch stores a batch using a single grouped ZADD command.
-// One Redis round-trip regardless of batch size (1–100 points).
+// IngestBatch stores a batch using a single grouped ZADD command,
+// then trims the device to its newest 1024 points via pipeline.
+// Two Redis commands, one round-trip.
 func (s *Store) IngestBatch(ctx context.Context, deviceID string, points []TelemetryPoint) (int, error) {
+	pipe, err := s.client.Pipeline(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("pipeline: %w", err)
+	}
+
 	key := deviceKey(deviceID)
-	scores := make([]int64, len(points))
-	members := make([][]byte, len(points))
-	bufs := make([]*[]byte, len(points))
+	bufs := make([]*[]byte, 0, len(points))
 	for i := range points {
 		buf := GetPointBuf()
 		points[i].EncodeInto(*buf)
-		scores[i] = points[i].TS
-		members[i] = *buf
-		bufs[i] = buf
+		pipe.ZADD(key, points[i].TS, *buf)
+		bufs = append(bufs, buf)
 	}
 
-	err := s.client.ZADDMulti(ctx, key, scores, members)
+	// Trim to newest 1024 — bounded memory, zero extra round-trip.
+	pipe.ZREMRANGEBYRANK(key, 0, -(retainPerDevice + 1))
+
+	if err := pipe.Exec(ctx); err != nil {
+		for _, b := range bufs {
+			PutPointBuf(b)
+		}
+		return 0, fmt.Errorf("pipeline exec: %w", err)
+	}
+
 	for _, b := range bufs {
 		PutPointBuf(b)
-	}
-	if err != nil {
-		return 0, fmt.Errorf("zaddmulti: %w", err)
 	}
 	return len(points), nil
 }

@@ -100,6 +100,18 @@ func (c *Client) ZREVRANGE(ctx context.Context, key string, start, stop int) ([]
 	return conn.Do(ctx, "ZREVRANGE", key, start, stop).ExpectBulkArray()
 }
 
+// ZREMRANGEBYRANK removes all members in the sorted set with rank between start and stop.
+// Use 0 and -(retain+1) to keep only the newest retain members.
+func (c *Client) ZREMRANGEBYRANK(ctx context.Context, key string, start, stop int64) error {
+	conn, err := c.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.pool.Put(conn)
+
+	return conn.Do(ctx, "ZREMRANGEBYRANK", key, start, stop).ExpectInt()
+}
+
 // Pipeline collects commands and flushes them in a single round trip.
 type Pipeline struct {
 	client *Client
@@ -119,6 +131,11 @@ func (c *Client) Pipeline(ctx context.Context) (*Pipeline, error) {
 // ZADD queues a ZADD command.
 func (p *Pipeline) ZADD(key string, score int64, member []byte) *Result {
 	return p.queue("ZADD", key, score, member)
+}
+
+// ZREMRANGEBYRANK queues a ZREMRANGEBYRANK command to trim a sorted set.
+func (p *Pipeline) ZREMRANGEBYRANK(key string, start, stop int64) *Result {
+	return p.queue("ZREMRANGEBYRANK", key, start, stop)
 }
 
 // Exec flushes all queued commands and reads all responses. Returns the connection to the pool.
