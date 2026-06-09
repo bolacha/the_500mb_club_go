@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/bolacha/the_500mb_club_go/internal/anomaly"
 	"github.com/bolacha/the_500mb_club_go/internal/telemetry"
@@ -62,30 +64,72 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 		limit = l
 	}
 
-	cursor := int64(0)
+	// Parse tie-safe cursor: "timestamp:offset" or legacy plain timestamp.
+	var cursorTS int64
+	var cursorOffset int
 	if cs := q.Get("cursor"); cs != "" {
-		c, err := strconv.ParseInt(cs, 10, 64)
-		if err != nil {
-			http.Error(w, `{"error":"invalid cursor"}`, http.StatusBadRequest)
-			return
+		if idx := strings.IndexByte(cs, ':'); idx >= 0 {
+			c, err := strconv.ParseInt(cs[:idx], 10, 64)
+			if err != nil {
+				http.Error(w, `{"error":"invalid cursor"}`, http.StatusBadRequest)
+				return
+			}
+			o, err := strconv.Atoi(cs[idx+1:])
+			if err != nil {
+				http.Error(w, `{"error":"invalid cursor"}`, http.StatusBadRequest)
+				return
+			}
+			cursorTS = c
+			cursorOffset = o
+		} else {
+			// Legacy: plain timestamp cursor — start after it.
+			c, err := strconv.ParseInt(cs, 10, 64)
+			if err != nil {
+				http.Error(w, `{"error":"invalid cursor"}`, http.StatusBadRequest)
+				return
+			}
+			cursorTS = c + 1 // exclusive
 		}
-		cursor = c
 	}
 
-	points, err := h.store.Query(r.Context(), id, from, to, limit, cursor)
+	points, err := h.store.Query(r.Context(), id, from, to, limit+1, cursorTS)
 	if err != nil {
 		h.logger.Error("query failed", "device", id, "err", err)
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		return
 	}
 
+	// Apply offset: skip points at cursorTS that were already returned.
+	if cursorOffset > 0 && len(points) > 0 {
+		skip := cursorOffset
+		for i, p := range points {
+			if p.TS != cursorTS || skip == 0 {
+				points = points[i:]
+				break
+			}
+			skip--
+		}
+	}
+
 	h.queryCount.Add(1)
 
-	// Determine next_cursor from the last returned point's timestamp.
+	// Determine next_cursor with tie-safe encoding.
 	var nextCursor *string
-	if len(points) == limit {
-		ts := strconv.FormatInt(points[len(points)-1].TS, 10)
-		nextCursor = &ts
+	if len(points) > limit {
+		last := points[limit-1]
+		// Count how many points at this timestamp are in the page.
+		sameTS := 0
+		for i := limit - 1; i >= 0 && points[i].TS == last.TS; i-- {
+			sameTS++
+		}
+		// Count total points with this TS in the full result.
+		totalSameTS := sameTS
+		for i := limit; i < len(points) && points[i].TS == last.TS; i++ {
+			totalSameTS++
+		}
+		enc := fmt.Sprintf("%d:%d", last.TS, totalSameTS)
+		nextCursor = &enc
+		points = points[:limit]
 	}
 
 	w.Header().Set("Content-Type", "application/json")

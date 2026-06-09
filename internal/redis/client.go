@@ -51,6 +51,29 @@ func (c *Client) ZADD(ctx context.Context, key string, score int64, member []byt
 	return conn.Do(ctx, "ZADD", key, score, member).ExpectInt()
 }
 
+// ZADDMulti adds multiple score-member pairs to a sorted set in one command.
+// One Redis round-trip regardless of batch size — massive reduction vs N individual ZADDs.
+func (c *Client) ZADDMulti(ctx context.Context, key string, scores []int64, members [][]byte) error {
+	if len(scores) == 0 {
+		return nil
+	}
+	conn, err := c.pool.Get(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.pool.Put(conn)
+
+	// Build: ZADD key score1 member1 score2 member2 ...
+	args := make([]any, 2+2*len(scores))
+	args[0] = "ZADD"
+	args[1] = key
+	for i := range scores {
+		args[2+2*i] = scores[i]
+		args[2+2*i+1] = members[i]
+	}
+	return conn.Do(ctx, args...).ExpectInt()
+}
+
 // ZRANGEBYSCORE returns members in [min, max] with optional LIMIT offset count.
 func (c *Client) ZRANGEBYSCORE(ctx context.Context, key string, min, max int64, offset, count int) ([][]byte, error) {
 	conn, err := c.pool.Get(ctx)
@@ -319,8 +342,15 @@ func (c *Conn) readResponse() (any, error) {
 	}
 }
 
-// readBulkString reads a bulk string (type byte already consumed by readResponse).
+// readBulkString reads a bulk string, consuming the leading '$' type byte.
 func (c *Conn) readBulkString() ([]byte, error) {
+	typ, err := c.rd.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	if typ != '$' {
+		return nil, fmt.Errorf("expected '$', got '%c'", typ)
+	}
 	return c.readBulkData()
 }
 

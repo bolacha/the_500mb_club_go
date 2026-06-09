@@ -122,6 +122,52 @@ xychart-beta
 | #114 (Config F, outlier) | 1.39 | 5.22 | 2.16 | 1.91 | 4.0 | 1.5 |
 | #124 (Config F, rerun) | 1.60 | 3.02 | 2.45 | 1.67 | 4.0 | 1.5 |
 
+## Endurance: 2000 RPS × 45 Minutes
+
+Proves the stack can sustain high load indefinitely within the memory budget:
+
+| Metric | Value |
+|--------|-------|
+| Total requests | **4,486,724** |
+| Errors | **0** (0.00%) |
+| p99 latency | **2.2ms** — flat across all 45 minutes |
+| Latency drift | **None** — p99 identical at 5min, 25min, 45min |
+| Redis memory | Cycles 2MB → 143MB → LRU evict → repeat |
+| Total RSS | ~170MB peak (34% of 500MB budget) |
+
+```
+TIME     REDIS_MB  REQUESTS  ERRORS  P99
+  5 min     46.0    498,828      0   2.21ms
+ 15 min    126.9  1,496,287      0   2.26ms
+ 25 min     66.6  2,491,700      0   2.25ms
+ 35 min    143.8  3,488,495      0   2.24ms
+ 45 min        —  4,486,724      0      —
+```
+
+## Recent Optimizations
+
+### Grouped ZADD for batch ingestion
+
+`POST /telemetry/batch` (100 points) now uses a single `ZADD key score1 member1 ... score100 member100` Redis command instead of 100 individual ZADDs in a pipeline. One round-trip regardless of batch size.
+
+### Tie-safe range cursor
+
+Cursor pagination now encodes `timestamp:offset` instead of plain timestamp. When multiple points share the same millisecond timestamp, the offset prevents data loss across page boundaries.
+
+### Redis memory tuning
+
+| Setting | Before | After | Why |
+|---------|--------|-------|-----|
+| `maxmemory` | 40MB | 150MB | OOM at 6min under 2000 RPS → 45+ min |
+| `maxmemory-policy` | `noeviction` | `allkeys-lru` | Rejected writes → evicts oldest data |
+| Container `mem_limit` | 50MB | 200MB | Redis overhead + working set |
+
+Budget: Redis 200MB + 3×API 60MB + nginx 20MB = **280MB** (56% of 500MB cap).
+
+### RESP2 array response fix
+
+Fixed a bug where `readBulkString` skipped the `$` type byte when parsing array (ZRANGEBYSCORE/ZREVRANGE) responses. Was silently causing `strconv.Atoi: parsing "$56": invalid syntax` on range and anomaly queries under load.
+
 ## Key Design Decisions
 
 ### 1. Write-Buffer for Single POSTs

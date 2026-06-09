@@ -95,11 +95,11 @@ func main() {
 }
 
 func seedDevice(id string) {
-	points := make([]map[string]any, 256)
+	points := make([]map[string]any, 100)
 	base := time.Now().UnixMilli()
 	for i := range points {
 		points[i] = map[string]any{
-			"ts":      base - int64((256-i)*100),
+			"ts":      base - int64((100-i)*100),
 			"lat":     -23.55 + float64(i)*0.001,
 			"lon":     -46.63 + float64(i)*0.001,
 			"battery": 0.8,

@@ -30,47 +30,37 @@ func (s *Store) IngestSingle(ctx context.Context, deviceID string, p TelemetryPo
 	return err
 }
 
-// IngestBatch stores a batch of telemetry points using a Redis pipeline.
-// Returns the number of points accepted.
+// IngestBatch stores a batch using a single grouped ZADD command.
+// One Redis round-trip regardless of batch size (1–100 points).
 func (s *Store) IngestBatch(ctx context.Context, deviceID string, points []TelemetryPoint) (int, error) {
-	pipe, err := s.client.Pipeline(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("pipeline: %w", err)
-	}
-
 	key := deviceKey(deviceID)
-	bufs := make([]*[]byte, 0, len(points))
+	scores := make([]int64, len(points))
+	members := make([][]byte, len(points))
+	bufs := make([]*[]byte, len(points))
 	for i := range points {
 		buf := GetPointBuf()
 		points[i].EncodeInto(*buf)
-		pipe.ZADD(key, points[i].TS, *buf)
-		bufs = append(bufs, buf)
+		scores[i] = points[i].TS
+		members[i] = *buf
+		bufs[i] = buf
 	}
 
-	if err := pipe.Exec(ctx); err != nil {
-		// Return buffers to pool even on error.
-		for _, b := range bufs {
-			PutPointBuf(b)
-		}
-		return 0, fmt.Errorf("pipeline exec: %w", err)
-	}
-
-	// Return buffers to pool after successful exec.
+	err := s.client.ZADDMulti(ctx, key, scores, members)
 	for _, b := range bufs {
 		PutPointBuf(b)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("zaddmulti: %w", err)
 	}
 	return len(points), nil
 }
 
 // Query returns telemetry points within [from, to] (inclusive), ordered by ts ascending.
-// Supports cursor-based pagination: pass the last returned ts as cursor for the next page.
-// If cursor is non-zero, points with ts <= cursor are excluded.
+// Supports cursor-based pagination: pass the starting ts as cursor, handler applies offset.
 func (s *Store) Query(ctx context.Context, deviceID string, from, to int64, limit int, cursor int64) ([]TelemetryPoint, error) {
-	// With cursor, we use (cursor as exclusive lower bound.
 	min := from
-	if cursor > min {
-		// Use exclusive range: add 1 to skip the cursor value itself.
-		min = cursor + 1
+	if cursor > 0 && cursor > min {
+		min = cursor // inclusive — handler applies tie-safe offset
 	}
 
 	raw, err := s.client.ZRANGEBYSCORE(ctx, deviceKey(deviceID), min, to, 0, limit)

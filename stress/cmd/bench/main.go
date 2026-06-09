@@ -365,11 +365,11 @@ func pickOp() string {
 }
 
 func seedDevice(id string) {
-	points := make([]map[string]any, 256)
+	points := make([]map[string]any, 100)
 	base := time.Now().UnixMilli()
 	for i := range points {
 		points[i] = map[string]any{
-			"ts": base - int64((256-i)*100), "lat": -23.55, "lon": -46.63,
+			"ts": base - int64((100-i)*100), "lat": -23.55, "lon": -46.63,
 			"battery": 0.8, "ax": float64(i%3) * 0.1, "ay": float64(i%5) * 0.05, "az": 9.81,
 		}
 	}
